@@ -593,7 +593,7 @@ void add(reg_alloc regs, avx512_integer in_a, avx512_integer in_b, avx512_intege
 
         static bool outputted_table=false;
         if (!outputted_table) {
-            #ifdef CHIAOSX
+            #ifdef CHIKOSX
                 APPEND_M(str( ".text " ));
             #else
                 APPEND_M(str( ".text 1" ));
@@ -623,7 +623,7 @@ void add(reg_alloc regs, avx512_integer in_a, avx512_integer in_b, avx512_intege
 
         //temp_1 has the address of the table entry
         APPEND_M(str( "SHL `temp_0, 5" )); //multiply by 32 to convert the index to a byte offset
-        #ifdef CHIAOSX
+        #ifdef CHIKOSX
             APPEND_M(str( "LEA `temp_1, [RIP+avx512_add_table]" )); //base of the table
             APPEND_M(str( "ADD `temp_1, `temp_0")); //address of the table entry
         #else

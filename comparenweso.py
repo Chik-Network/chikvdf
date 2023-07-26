@@ -1,6 +1,6 @@
 import time
 
-from chiavdf import verify_n_wesolowski, verify_wesolowski
+from chikvdf import verify_n_wesolowski, verify_wesolowski
 
 
 class ClassGroup(tuple):

@@ -17,7 +17,7 @@
     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-    MIT licensing permission obtained January 13, 2020 by Chia Network Inc. from William Hart
+    MIT licensing permission obtained January 13, 2020 by Chik Network Inc. from William Hart
     */
 
 #ifndef _XGCD_PARTIAL

@@ -158,7 +158,7 @@ class get_pybind_include(object):
 
 ext_modules = [
     Extension(
-        "chiavdf",
+        "chikvdf",
         sorted(
             [
                 "src/python_bindings/fastvdf.cpp",
@@ -245,15 +245,15 @@ class BuildExt(build_ext):
 
 if platform.system() == "Windows":
     setup(
-        name="chiavdf",
+        name="chikvdf",
         author="Mariano Sorgente",
-        author_email="mariano@chia.net",
-        description="Chia vdf verification (wraps C++)",
+        author_email="mariano@chiknetwork.com",
+        description="Chik vdf verification (wraps C++)",
         license="Apache License",
         python_requires=">=3.7",
         long_description=open("README.md").read(),
         long_description_content_type="text/markdown",
-        url="https://github.com/Chia-Network/chiavdf",
+        url="https://github.com/Chik-Network/chikvdf",
         ext_modules=ext_modules,
         cmdclass={"build_ext": BuildExt},
         zip_safe=False,
@@ -263,16 +263,16 @@ else:
     install.sub_commands.append(("install_hook", lambda x: True))
 
     setup(
-        name="chiavdf",
+        name="chikvdf",
         author="Florin Chirica",
-        author_email="florin@chia.net",
-        description="Chia vdf verification (wraps C++)",
+        author_email="florin@chiknetwork.com",
+        description="Chik vdf verification (wraps C++)",
         license="Apache License",
         python_requires=">=3.7",
         long_description=open("README.md").read(),
         long_description_content_type="text/markdown",
-        url="https://github.com/Chia-Network/chiavdf",
-        ext_modules=[CMakeExtension("chiavdf", "src")],
+        url="https://github.com/Chik-Network/chikvdf",
+        ext_modules=[CMakeExtension("chikvdf", "src")],
         cmdclass=dict(
             build_ext=CMakeBuild, install_hook=install_hook, build_hook=build_hook
         ),

@@ -67,7 +67,7 @@ struct asm_function {
 
         name=t_name;
 
-#ifdef CHIAOSX
+#ifdef CHIKOSX
         APPEND_M(str( ".global _asm_")+asmprefix+str("func_#", t_name ));
         APPEND_M(str( "_asm_")+asmprefix+str("func_#:", t_name ));
 #else

@@ -7,7 +7,7 @@ IF(NOT CMAKE_BUILD_TYPE)
   SET(CMAKE_BUILD_TYPE "RELEASE")
 ENDIF()
 
-project(chiavdf)
+project(chikvdf)
 
 set(CMAKE_MODULE_PATH
     ${CMAKE_CURRENT_LIST_DIR}/cmake
@@ -36,7 +36,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11-src)
 
-pybind11_add_module(chiavdf
+pybind11_add_module(chikvdf
   ${CMAKE_CURRENT_SOURCE_DIR}/python_bindings/fastvdf.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/refcode/lzcnt.c
 )
@@ -46,5 +46,5 @@ add_executable(verifier_test
   ${CMAKE_CURRENT_SOURCE_DIR}/refcode/lzcnt.c
 )
 
-target_link_libraries(chiavdf PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} -pthread)
+target_link_libraries(chikvdf PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} -pthread)
 target_link_libraries(verifier_test ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} -pthread)

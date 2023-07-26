@@ -1,17 +1,17 @@
-# Chia VDF
+# Chik VDF
 
-![Build](https://github.com/Chia-Network/chiavdf/workflows/Build/badge.svg)
-![PyPI](https://img.shields.io/pypi/v/chiavdf?logo=pypi)
-![PyPI - Format](https://img.shields.io/pypi/format/chiavdf?logo=pypi)
-![GitHub](https://img.shields.io/github/license/Chia-Network/chiavdf?logo=Github)
+![Build](https://github.com/Chik-Network/chikvdf/workflows/Build/badge.svg)
+![PyPI](https://img.shields.io/pypi/v/chikvdf?logo=pypi)
+![PyPI - Format](https://img.shields.io/pypi/format/chikvdf?logo=pypi)
+![GitHub](https://img.shields.io/github/license/Chik-Network/chikvdf?logo=Github)
 
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/Chia-Network/chiavdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chia-Network/chiavdf/alerts/)
-[![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Chia-Network/chiavdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chia-Network/chiavdf/context:python)
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/Chia-Network/chiavdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chia-Network/chiavdf/context:cpp)
+[![Total alerts](https://img.shields.io/lgtm/alerts/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/alerts/)
+[![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/context:python)
+[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/context:cpp)
 
 ## Building a wheel
 
-Compiling chiavdf requires cmake, boost and GMP/MPIR.
+Compiling chikvdf requires cmake, boost and GMP/MPIR.
 
 ```bash
 python3 -m venv venv
@@ -29,12 +29,12 @@ CMake uses
 to download [pybind11](https://github.com/pybind/pybind11).
 Building is then managed by
 [cibuildwheel](https://github.com/joerick/cibuildwheel). Further installation
-is then available via `pip install chiavdf` e.g.
+is then available via `pip install chikvdf` e.g.
 
 ## Building Timelord and related binaries
 
 In addition to building the required binary and source wheels for Windows,
-MacOS and Linux, chiavdf can be used to compile vdf_client and vdf_bench.
+MacOS and Linux, chikvdf can be used to compile vdf_client and vdf_bench.
 vdf_client is the core VDF process that completes the Proof of Time submitted
 to it by the Timelord. The repo also includes a benchmarking tool to get a
 sense of the iterations per second of a given CPU called vdf_bench. Try
@@ -47,9 +47,9 @@ Similarly, to build vdf_bench set the environment variable BUILD_VDF_BENCH to
 "Y". `export BUILD_VDF_BENCH=Y`.
 
 This is currently automated via pip in the
-[install-timelord.sh](https://github.com/Chia-Network/chia-blockchain/blob/master/install-timelord.sh)
+[install-timelord.sh](https://github.com/Chik-Network/chik-blockchain/blob/master/install-timelord.sh)
 script in the
-[chia-blockchain repository](https://github.com/Chia-Network/chia-blockchain)
+[chik-blockchain repository](https://github.com/Chik-Network/chik-blockchain)
 which depends on this repository.
 
 If you're running a timelord, the following tests are available, depending of which type of timelord you are running:
@@ -64,16 +64,16 @@ Those tests will simulate the vdf_client and verify for correctness the produced
 
 ## Contributing and workflow
 
-Contributions are welcome and more details are available in chia-blockchain's
-[CONTRIBUTING.md](https://github.com/Chia-Network/chia-blockchain/blob/master/CONTRIBUTING.md).
+Contributions are welcome and more details are available in chik-blockchain's
+[CONTRIBUTING.md](https://github.com/Chik-Network/chik-blockchain/blob/master/CONTRIBUTING.md).
 
 The master branch is the currently released latest version on PyPI. Note that
-at times chiavdf will be ahead of the release version that chia-blockchain
-requires in it's master/release version in preparation for a new chia-blockchain
+at times chikvdf will be ahead of the release version that chik-blockchain
+requires in it's master/release version in preparation for a new chik-blockchain
 release. Please branch or fork master and then create a pull request to the
 master branch. Linear merging is enforced on master and merging requires a
-completed review. PRs will kick off a ci build and analysis of chiavdf at
-[lgtm.com](https://lgtm.com/projects/g/Chia-Network/chiavdf/?mode=list). Please
+completed review. PRs will kick off a ci build and analysis of chikvdf at
+[lgtm.com](https://lgtm.com/projects/g/Chik-Network/chikvdf/?mode=list). Please
 make sure your build is passing and that it does not increase alerts at lgtm.
 
 ## Background from prior VDF competitions
@@ -97,7 +97,7 @@ Our VDF construction is described in classgroup.pdf. The implementation details 
 
 ## Main VDF Loop
 
-The main VDF loop produces repeated squarings of the generator form (i.e. calculates y(n) = g^(2^n)) as fast as possible, until the program is interrupted. Sundersoft's entry from [Chia's 2nd VDF contest](https://github.com/Chia-Network/vdfcontest2results) is used, together with the fast reducer used in Pulmark's entry. This approach is described below:
+The main VDF loop produces repeated squarings of the generator form (i.e. calculates y(n) = g^(2^n)) as fast as possible, until the program is interrupted. Sundersoft's entry from [Chik's 2nd VDF contest](https://github.com/Chik-Network/vdfcontest2results) is used, together with the fast reducer used in Pulmark's entry. This approach is described below:
 
 The NUDUPL algorithm is used. The equations are based on cryptoslava's equations from the 1st contest. They were modified slightly to increase the level of parallelism.
 

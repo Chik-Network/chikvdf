@@ -5,8 +5,8 @@
 
 namespace py = pybind11;
 
-PYBIND11_MODULE(chiavdf, m) {
-    m.doc() = "Chia proof of time";
+PYBIND11_MODULE(chikvdf, m) {
+    m.doc() = "Chik proof of time";
 
     // Creates discriminant.
     m.def("create_discriminant", [] (const py::bytes& challenge_hash, int discriminant_size_bits) {

@@ -78,7 +78,7 @@ void gcd_base_continued_fraction(
     static bool outputted_table=false;
 
     if (!outputted_table) {
-#ifdef CHIAOSX
+#ifdef CHIKOSX
         APPEND_M(str( ".text " ));
 #else
         APPEND_M(str( ".text 1" ));
@@ -185,7 +185,7 @@ void gcd_base_continued_fraction(
 
         //m_0: column 0
         //m_1: column 1
-#ifdef CHIAOSX
+#ifdef CHIKOSX
         APPEND_M(str( "LEA RSI,[RIP+")+asmprefix+str("gcd_base_table]"));
         APPEND_M(str( "MOVAPD `m_0, [`q_scalar+RSI]" ));
         APPEND_M(str( "MOVAPD `m_1, [16+`q_scalar+RSI]" ));

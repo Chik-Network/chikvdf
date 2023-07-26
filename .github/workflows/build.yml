@@ -27,7 +27,7 @@ jobs:
             matrix: macos
             runs-on:
               arm: [macOS, ARM64]
-              intel: [macos-latest]
+              intel: [macos-11]
             cibw-archs-macos:
               arm: arm64
               intel: x86_64
@@ -72,8 +72,8 @@ jobs:
               intel: manylinux2014
             matrix: '3.11'
         arch:
-          - name: ARM
-            matrix: arm
+#          - name: ARM
+#            matrix: arm
           - name: Intel
             matrix: intel
         exclude:
@@ -94,7 +94,7 @@ jobs:
               matrix: macos
               runs-on:
                 arm: [macOS, ARM64]
-                intel: [macos-latest]
+                intel: [macos-11]
             python:
               major-dot-minor: '3.7'
               cibw-build: 'cp37-*'
@@ -105,14 +105,14 @@ jobs:
 
     steps:
     - name: Clean workspace
-      uses: Chia-Network/actions/clean-workspace@main
+      uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
 
-    - uses: Chia-Network/actions/setup-python@main
+    - uses: Chik-Network/actions/setup-python@main
       with:
         python-version: ${{ matrix.python.major-dot-minor }}
 
@@ -155,11 +155,11 @@ jobs:
           python -m pip install --upgrade pip
         CIBW_ENVIRONMENT_MACOS: "MACOSX_DEPLOYMENT_TARGET=10.14 BUILD_VDF_CLIENT=N"
         CIBW_BEFORE_ALL_WINDOWS: >
-          git clone https://github.com/Chia-Network/mpir_gc_x64.git
+          git clone https://github.com/Chik-Network/mpir_gc_x64.git
         CIBW_ENVIRONMENT_WINDOWS: "BUILD_VDF_CLIENT=N SETUPTOOLS_USE_DISTUTILS=stdlib"
         CIBW_REPAIR_WHEEL_COMMAND_WINDOWS: >
           ls -l mpir_gc_x64 && pip uninstall -y delocate
-          && pip install git+https://github.com/Chia-Network/delocate.git
+          && pip install git+https://github.com/Chik-Network/delocate.git
           && delocate-wheel -v -i mpir_gc_x64/mpir.dll {wheel}
           && delocate-wheel -v -i mpir_gc_x64/mpir_gc.dll {wheel}
           && delocate-wheel -v -i mpir_gc_x64/mpir_broadwell.dll {wheel}
@@ -203,14 +203,14 @@ jobs:
 
     steps:
     - name: Clean workspace
-      uses: Chia-Network/actions/clean-workspace@main
+      uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
 
-    - uses: Chia-Network/actions/setup-python@main
+    - uses: Chik-Network/actions/setup-python@main
       with:
         python-version: ${{ matrix.python.major-dot-minor }}
 
@@ -246,14 +246,14 @@ jobs:
 
     steps:
     - name: Clean workspace
-      uses: Chia-Network/actions/clean-workspace@main
+      uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
 
-    - uses: Chia-Network/actions/setup-python@main
+    - uses: Chik-Network/actions/setup-python@main
       with:
         python-version: ${{ matrix.python.major-dot-minor }}
 
@@ -292,14 +292,14 @@ jobs:
 
     steps:
     - name: Clean workspace
-      uses: Chia-Network/actions/clean-workspace@main
+      uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
       uses: actions/checkout@v3
       with:
         fetch-depth: 0
 
-    - uses: Chia-Network/actions/setup-python@main
+    - uses: Chik-Network/actions/setup-python@main
       with:
         python-version: ${{ matrix.python.major-dot-minor }}
 
