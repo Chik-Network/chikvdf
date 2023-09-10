@@ -7,7 +7,7 @@ import sys
 from distutils.command.install import install
 from distutils.version import LooseVersion
 
-from setuptools import Command, Extension, setup, setuptools
+from setuptools import Command, Extension, setup, errors
 from setuptools.command.build import build
 from setuptools.command.build_ext import build_ext
 
@@ -190,7 +190,7 @@ def has_flag(compiler, flagname):
         f.write("int main (int argc, char **argv) { return 0; }")
         try:
             compiler.compile([f.name], extra_postargs=[flagname])
-        except setuptools.distutils.errors.CompileError:
+        except errors.CompileError:
             return False
     return True
 
@@ -221,11 +221,6 @@ class BuildExt(build_ext):
         "unix": [""],
     }
 
-    if sys.platform == "darwin":
-        darwin_opts = ["-stdlib=libc++", "-mmacosx-version-min=10.14"]
-        c_opts["unix"] += darwin_opts
-        l_opts["unix"] += darwin_opts  # type: ignore
-
     def build_extensions(self):
         ct = self.compiler.compiler_type
         opts = self.c_opts.get(ct, [])
@@ -250,7 +245,7 @@ if platform.system() == "Windows":
         author_email="mariano@chiknetwork.com",
         description="Chik vdf verification (wraps C++)",
         license="Apache License",
-        python_requires=">=3.7",
+        python_requires=">=3.8",
         long_description=open("README.md").read(),
         long_description_content_type="text/markdown",
         url="https://github.com/Chik-Network/chikvdf",
@@ -268,7 +263,7 @@ else:
         author_email="florin@chiknetwork.com",
         description="Chik vdf verification (wraps C++)",
         license="Apache License",
-        python_requires=">=3.7",
+        python_requires=">=3.8",
         long_description=open("README.md").read(),
         long_description_content_type="text/markdown",
         url="https://github.com/Chik-Network/chikvdf",

@@ -3,9 +3,9 @@ name: Test Prover and vdf_client
 on:
   push:
     branches:
-      - main
-    tags:
-      - '**'
+      #- main
+  release:
+    types: [published]
   pull_request:
     branches:
       - '**'
