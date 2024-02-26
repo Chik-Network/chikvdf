@@ -3,7 +3,7 @@ name: Test Prover and vdf_client
 on:
   push:
     branches:
-      #- main
+      - main1
   release:
     types: [published]
   pull_request:

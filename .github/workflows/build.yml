@@ -3,7 +3,7 @@ name: build - check - upload
 on:
   push:
     branches:
-    #- main
+    - main1
   release:
     types: [published]
   pull_request:
