@@ -1,13 +1,11 @@
 # Chik VDF
 
-![Build](https://github.com/Chik-Network/chikvdf/workflows/Build/badge.svg)
+![Build](https://github.com/Chik-Network/chikvdf/actions/workflows/build.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/chikvdf?logo=pypi)
 ![PyPI - Format](https://img.shields.io/pypi/format/chikvdf?logo=pypi)
 ![GitHub](https://img.shields.io/github/license/Chik-Network/chikvdf?logo=Github)
 
-[![Total alerts](https://img.shields.io/lgtm/alerts/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/alerts/)
-[![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/context:python)
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/Chik-Network/chikvdf.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Chik-Network/chikvdf/context:cpp)
+[![CodeQL](https://github.com/Chik-Network/chikvdf/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/Chik-Network/chikvdf/actions/workflows/codeql-analysis.yml)
 
 ## Building a wheel
 
