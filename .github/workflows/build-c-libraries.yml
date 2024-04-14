@@ -59,6 +59,15 @@ jobs:
             arch:
               name: ARM
               matrix: arm
+          - os:
+              name: macOS
+              matrix: macos
+              runs-on:
+                arm: [macOS, ARM64]
+                intel: [macos-11]
+            arch:
+              name: ARM
+              matrix: arm
 
     steps:
     - name: Clean workspace
