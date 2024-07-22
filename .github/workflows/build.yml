@@ -30,8 +30,8 @@ jobs:
           - name: macOS
             matrix: macos
             runs-on:
-              arm: [macOS, ARM64]
-              intel: [macos-11]
+              arm: [macos-14]
+              intel: [macos-12]
             cibw-archs-macos:
               arm: arm64
               intel: x86_64
@@ -47,33 +47,23 @@ jobs:
         python:
           - major-dot-minor: '3.8'
             cibw-build: 'cp38-*'
-            manylinux:
-              arch: manylinux2014
-              intel: manylinux2010
+            manylinux: manylinux_2_28
             matrix: '3.8'
           - major-dot-minor: '3.9'
             cibw-build: 'cp39-*'
-            manylinux:
-              arch: manylinux2014
-              intel: manylinux2010
+            manylinux: manylinux_2_28
             matrix: '3.9'
           - major-dot-minor: '3.10'
             cibw-build: 'cp310-*'
-            manylinux:
-              arch: manylinux2014
-              intel: manylinux2010
+            manylinux: manylinux_2_28
             matrix: '3.10'
           - major-dot-minor: '3.11'
             cibw-build: 'cp311-*'
-            manylinux:
-              arch: manylinux2014
-              intel: manylinux2014
+            manylinux: manylinux_2_28
             matrix: '3.11'
           - major-dot-minor: '3.12'
             cibw-build: 'cp312-*'
-            manylinux:
-              arch: manylinux2014
-              intel: manylinux2014
+            manylinux: manylinux_2_28
             matrix: '3.12'
 
         arch:
@@ -94,22 +84,13 @@ jobs:
             arch:
               name: ARM
               matrix: arm
-          - os:
-              name: macOS
-              matrix: macos
-              runs-on:
-                arm: [macOS, ARM64]
-                intel: [macos-11]
-            arch:
-              name: ARM
-              matrix: arm
 
     steps:
     - name: Clean workspace
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
@@ -124,17 +105,17 @@ jobs:
     - name: Build and test
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
-        CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux['arm'] }}
-        CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux['intel'] }}
+        CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
+        CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux }}
         CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
         CIBW_PRERELEASE_PYTHONS: True
       run:
-        pipx run --spec='cibuildwheel==2.16.2' cibuildwheel --output-dir dist 2>&1
+        pipx run --spec='cibuildwheel==2.19.2' cibuildwheel --output-dir dist 2>&1
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: packages
+        name: packages-${{ matrix.os.name }}-${{ matrix.python.major-dot-minor }}-${{ matrix.arch.name }}
         path: ./dist
 
   build-sdist:
@@ -161,7 +142,7 @@ jobs:
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
@@ -175,9 +156,9 @@ jobs:
         python -m build --sdist --outdir dist .
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
-        name: packages
+        name: packages-sdist-${{ matrix.os.name }}-${{ matrix.python.major-dot-minor }}-${{ matrix.arch.name }}
         path: ./dist
 
   check:
@@ -204,7 +185,7 @@ jobs:
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
@@ -250,7 +231,7 @@ jobs:
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
@@ -264,9 +245,10 @@ jobs:
         python-version: ${{ matrix.python.major-dot-minor }}
 
     - name: Download artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
-        name: packages
+        merge-multiple: true
+        pattern: packages-*
         path: ./dist
 
     - name: Publish distribution to PyPI

@@ -30,8 +30,8 @@ jobs:
           - name: macOS
             matrix: macos
             runs-on:
-              arm: [macOS, ARM64]
-              intel: [macos-11]
+              arm: [macos-14]
+              intel: [macos-12]
           - name: Ubuntu
             matrix: ubuntu
             runs-on:
@@ -56,15 +56,6 @@ jobs:
               matrix: windows
               runs-on:
                 intel: [windows-latest]
-            arch:
-              name: ARM
-              matrix: arm
-          - os:
-              name: macOS
-              matrix: macos
-              runs-on:
-                arm: [macOS, ARM64]
-                intel: [macos-11]
             arch:
               name: ARM
               matrix: arm
@@ -96,11 +87,11 @@ jobs:
       env:
         BUILD_VDF_CLIENT: "N"
       run: |
-        cmake . -DBUILD_CHIKVDFC=ON
+        cmake . -DBUILD_CHIKVDFC=ON -DBUILD_PYTHON=OFF
         cmake --build .
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: c-libraries-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}
         path: ./src/lib
@@ -127,7 +118,7 @@ jobs:
         Compress-Archive -Path ${{ env.DIST_DIR }}/* -Destination chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}.zip
 
     - name: Upload zip as artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}
         path: |
