@@ -139,7 +139,7 @@ setup(
     author="Florin Chirica",
     author_email="florin@chiknetwork.com",
     description="Chik vdf verification (wraps C++)",
-    license="Apache License",
+    license="Apache-2.0",
     python_requires=">=3.8",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

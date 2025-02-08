@@ -101,12 +101,12 @@ if(BUILD_CHIKVDFC)
 
   set_target_properties(chikvdfc_shared PROPERTIES
           OUTPUT_NAME chikvdfc
-          LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/shared"
-          RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/shared"
+          LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/shared$<0:>"
+          RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/shared$<0:>"
   )
 
   set_target_properties(chikvdfc_static PROPERTIES
           OUTPUT_NAME chikvdfc
-          ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/static"
+          ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/static$<0:>"
   )
 endif()
