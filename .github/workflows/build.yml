@@ -102,7 +102,7 @@ jobs:
       run: |
         pip install pipx
 
-    - name: Build and test macos 14
+    - name: Build and test on macos 14
       if: ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }}
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
