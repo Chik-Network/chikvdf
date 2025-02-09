@@ -110,7 +110,7 @@ jobs:
         CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux }}
         CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
         CIBW_PRERELEASE_PYTHONS: True
-        MACOSX_DEPLOYMENT_TARGET: 14
+        MACOSX_DEPLOYMENT_TARGET: "14"
       run: |
         pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
 
