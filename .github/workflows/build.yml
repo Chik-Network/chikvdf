@@ -115,7 +115,7 @@ jobs:
         pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
 
     - name: Build and test
-      if: !startsWith(matrix.os, 'macos') && !startsWith(matrix.arch, 'arm')
+      if: startsWith(matrix.os, 'macos') == false && !startsWith(matrix.arch, 'arm') == false
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
         CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
