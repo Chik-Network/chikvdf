@@ -102,7 +102,19 @@ jobs:
       run: |
         pip install pipx
 
-    - name: Build and test for arm on macos 14
+    - name: Build and test
+      if: ${{ ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }} == 'false' }}
+      env:
+        CIBW_BUILD: ${{ matrix.python.cibw-build }}
+        CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
+        CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux }}
+        CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
+        CIBW_PRERELEASE_PYTHONS: True
+        MACOSX_DEPLOYMENT_TARGET: "13"
+      run:
+        pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
+
+    - name: Build and test for arm64 on macos-14
       if: ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }}
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
@@ -112,18 +124,6 @@ jobs:
         CIBW_PRERELEASE_PYTHONS: True
         MACOSX_DEPLOYMENT_TARGET: "14"
       run: |
-        pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
-
-    - name: Build and test
-      if: ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }} == 'false'
-      env:
-        CIBW_BUILD: ${{ matrix.python.cibw-build }}
-        CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
-        CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux }}
-        CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
-        CIBW_PRERELEASE_PYTHONS: True
-        MACOSX_DEPLOYMENT_TARGET: "13"
-      run:
         pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
 
     - name: Upload artifacts
