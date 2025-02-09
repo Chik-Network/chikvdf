@@ -104,8 +104,10 @@ jobs:
 
     - name: Set MACOSX_DEPLOYMENT_TARGET
       if: startsWith(matrix.os, 'macos') && startsWith(matrix.arch, 'arm')
+      env:
+        MACOSX_DEPLOYMENT_TARGET: 14
       run: |
-        echo "MACOSX_DEPLOYMENT_TARGET=\"14\"" >> "$GITHUB_ENV"
+        echo "MACOSX_DEPLOYMENT_TARGET" >> "$GITHUB_OUTPUT"
 
     - name: Build and test
       env:
