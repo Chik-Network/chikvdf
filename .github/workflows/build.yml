@@ -114,7 +114,7 @@ jobs:
       run: |
         pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
 
-    - name: Build and test for intel on macos 13
+    - name: Build and test
       if: ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }} == false
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
