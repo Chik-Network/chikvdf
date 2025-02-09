@@ -103,7 +103,7 @@ jobs:
         pip install pipx
 
     - name: Build and test
-      if: ${{ ${{ matrix.os.name == 'macOS' && matrix.arch.name == 'ARM' }} == 'false' }}
+      if: ${{ (matrix.os.name == 'macOS' && matrix.arch.name == 'ARM') == 'false' }}
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
         CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
