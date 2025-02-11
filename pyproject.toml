@@ -33,6 +33,7 @@ before-build = "python -m pip install --upgrade pip"
 [tool.cibuildwheel.macos]
 build-verbosity = 0
 before-all = '''
+brew uninstall gmp
 export MACOSX_DEPLOYMENT_TARGET=13.0
 brew install gmp --build-from-source
 brew install boost cmake
