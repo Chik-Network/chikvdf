@@ -46,6 +46,7 @@ make install
 export CFLAGS="-I$HOMEBREW_PREFIX/gmp-6.2.1/include"
 export LDFLAGS="-L$HOMEBREW_PREFIX/gmp-6.2.1/lib"
 export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/gmp-6.2.1/lib/pkgconfig"
+export DYLD_LIBRARY_PATH=$HOMEBREW_PREFIX/gmp-6.2.1/lib:$DYLD_LIBRARY_PATH
 otool -l $HOMEBREW_PREFIX/gmp-6.2.1/lib/libgmp.dylib | grep -A 3 LC_VERSION_MIN_MACOSX
 brew install boost cmake
 '''
