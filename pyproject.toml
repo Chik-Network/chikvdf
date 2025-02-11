@@ -34,16 +34,19 @@ before-build = "python -m pip install --upgrade pip"
 build-verbosity = 0
 before-all = '''
 export MACOSX_DEPLOYMENT_TARGET=13.0
+mkdir ~/gmp
+export HOMEBREW_PREFIX=~/gmp
+cd $HOMEBREW_PREFIX
 wget https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.xz
 tar -xf gmp-6.2.1.tar.xz
 cd gmp-6.2.1
-./configure --prefix=/usr/local/gmp-6.2.1 --enable-cxx
+./configure --prefix=$HOMEBREW_PREFIX/gmp-6.2.1 --enable-cxx
 make
 make install
-export CFLAGS="-I/usr/local/gmp-6.2.1/include"
-export LDFLAGS="-L/usr/local/gmp-6.2.1/lib"
-export PKG_CONFIG_PATH="/usr/local/gmp-6.2.1/lib/pkgconfig"
-otool -l /usr/local/gmp-6.2.1/lib/libgmp.dylib | grep -A 3 LC_VERSION_MIN_MACOSX
+export CFLAGS="-I$HOMEBREW_PREFIX/gmp-6.2.1/include"
+export LDFLAGS="-L$HOMEBREW_PREFIX/gmp-6.2.1/lib"
+export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/gmp-6.2.1/lib/pkgconfig"
+otool -l $HOMEBREW_PREFIX/gmp-6.2.1/lib/libgmp.dylib | grep -A 3 LC_VERSION_MIN_MACOSX
 brew install boost cmake
 '''
 before-build = "python -m pip install --upgrade pip"
