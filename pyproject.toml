@@ -33,9 +33,17 @@ before-build = "python -m pip install --upgrade pip"
 [tool.cibuildwheel.macos]
 build-verbosity = 0
 before-all = '''
-brew uninstall gmp
 export MACOSX_DEPLOYMENT_TARGET=13.0
-brew install gmp --build-from-source
+wget https://gmplib.org/download/gmp/gmp-6.2.1.tar.xz
+tar -xf gmp-6.2.1.tar.xz
+cd gmp-6.2.1
+./configure --prefix=/usr/local/gmp-6.2.1 --enable-cxx
+make
+make install
+export CFLAGS="-I/usr/local/gmp-6.2.1/include"
+export LDFLAGS="-L/usr/local/gmp-6.2.1/lib"
+export PKG_CONFIG_PATH="/usr/local/gmp-6.2.1/lib/pkgconfig"
+otool -l /usr/local/gmp-6.2.1/lib/libgmp.dylib | grep -A 3 LC_VERSION_MIN_MACOSX
 brew install boost cmake
 '''
 before-build = "python -m pip install --upgrade pip"
