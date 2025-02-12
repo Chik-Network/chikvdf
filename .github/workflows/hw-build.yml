@@ -30,6 +30,11 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: Chik-Network/actions/setup-python@main
+        name: Install Python
+        with:
+          python-version: "3.10"
+
       - name: Set Env
         uses: Chik-Network/actions/setjobenv@main
         env:
@@ -69,7 +74,7 @@ jobs:
           INSTALLER_VERSION: "${{ env.RELEASE_TAG || format('0.0.1-{0}', github.run_id) }}"
           PLATFORM: "amd64"
         run: |
-          pip install j2cli
+          pip install jinjanator
           CLI_DEB_BASE="chikvdf-hw_$INSTALLER_VERSION-1_$PLATFORM"
           mkdir -p "dist/$CLI_DEB_BASE/usr/bin"
           mkdir -p "dist/$CLI_DEB_BASE/usr/lib"

@@ -140,7 +140,7 @@ setup(
     author_email="florin@chiknetwork.com",
     description="Chik vdf verification (wraps C++)",
     license="Apache-2.0",
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/Chik-Network/chikvdf",

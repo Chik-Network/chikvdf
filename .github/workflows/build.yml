@@ -45,10 +45,6 @@ jobs:
             runs-on:
               intel: [windows-latest]
         python:
-          - major-dot-minor: '3.8'
-            cibw-build: 'cp38-*'
-            manylinux: manylinux_2_28
-            matrix: '3.8'
           - major-dot-minor: '3.9'
             cibw-build: 'cp39-*'
             manylinux: manylinux_2_28
@@ -69,8 +65,8 @@ jobs:
         arch:
           - name: ARM
             matrix: arm
-#          - name: Intel
-#            matrix: intel
+          - name: Intel
+            matrix: intel
         exclude:
           # Only partial entries are required here by GitHub Actions so generally I
           # only specify the `matrix:` entry.  The super linter complains so for now
@@ -84,14 +80,6 @@ jobs:
             arch:
               name: ARM
               matrix: arm
-#          - os:
-#              name: macOS
-#              matrix: macos
-#              runs-on:
-#                arm: [macos-14]
-#            arch:
-#              name: ARM
-#              matrix: arm
 
     steps:
     - name: Clean workspace
@@ -118,7 +106,7 @@ jobs:
         CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
         CIBW_PRERELEASE_PYTHONS: True
       run:
-        pipx run --spec='cibuildwheel==2.22.0' cibuildwheel --output-dir dist 2>&1
+        pipx run --spec='cibuildwheel==2.19.2' cibuildwheel --output-dir dist 2>&1
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
