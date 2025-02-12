@@ -112,7 +112,7 @@ jobs:
         if: env.RELEASE == 'true'
 
       - name: Trigger repo update
-        if: env.RELEASE == 'true'
+        if: env.RELEASE == 'true' && '1' == '2'
         uses: Chik-Network/actions/github/glue@main
         with:
           json_data: '{"release_version":"${{ env.RELEASE_TAG }}"}'
