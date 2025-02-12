@@ -33,27 +33,24 @@ before-build = "python -m pip install --upgrade pip"
 [tool.cibuildwheel.macos]
 build-verbosity = 0
 before-all = '''
-export MACOSX_DEPLOYMENT_TARGET=13.0
-mkdir ~/gmp
-export HOMEBREW_PREFIX=~/gmp
-cd $HOMEBREW_PREFIX
-wget https://ftp.gnu.org/gnu/gmp/gmp-6.2.1.tar.xz
-tar -xf gmp-6.2.1.tar.xz
-cd gmp-6.2.1
-./configure --prefix=$HOMEBREW_PREFIX/gmp-6.2.1 --enable-cxx
+export MACOSX_DEPLOYMENT_TARGET=13
+mkdir $HOME/gmp
+cd $HOME/gmp
+wget https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
+tar -xf gmp-6.3.0.tar.xz
+cd gmp-6.3.0
+./configure --prefix=$HOME/gmp/gmp-6.3.0 --enable-cxx
 make
 make install
-export CFLAGS="-I$HOMEBREW_PREFIX/gmp-6.2.1/include"
-export LDFLAGS="-L$HOMEBREW_PREFIX/gmp-6.2.1/lib"
-export PKG_CONFIG_PATH="$HOMEBREW_PREFIX/gmp-6.2.1/lib/pkgconfig"
-export REPAIR_LIBRARY_PATH=$HOMEBREW_PREFIX/gmp-6.2.1/lib
-otool -l $HOMEBREW_PREFIX/gmp-6.2.1/lib/libgmp.dylib | grep -A 3 LC_VERSION_MIN_MACOSX
+export CFLAGS="-I$HOME/gmp/gmp-6.3.0/include"
+export LDFLAGS="-L$HOME/gmp/gmp-6.3.0/lib"
+export PKG_CONFIG_PATH="$HOME/gmp/gmp-6.3.0/lib/pkgconfig"
 brew install boost cmake
 '''
 before-build = "python -m pip install --upgrade pip"
 environment = {MACOSX_DEPLOYMENT_TARGET="13", SYSTEM_VERSION_COMPAT=0, BUILD_VDF_CLIENT="N"}
 repair-wheel-command = """\
-DYLD_LIBRARY_PATH=/Users/runner/gmp/gmp-6.2.1/lib delocate-wheel \
+DYLD_LIBRARY_PATH=$HOME/gmp/gmp-6.3.0/lib delocate-wheel \
 --require-archs {delocate_archs} -w {dest_dir} -v {wheel}\
 """
 
