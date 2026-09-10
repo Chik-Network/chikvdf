@@ -1,7 +1,11 @@
 #include "bqfc.h"
 
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* xgcd_partial.c is linked via C++ translation units; declare symbol for C++ compile path. */
+void mpz_xgcd_partial(mpz_t co2, mpz_t co1, mpz_t r2, mpz_t r1, const mpz_t L);
 
 int bqfc_compr(struct qfb_c *out_c, mpz_t a, mpz_t b)
 {
@@ -49,7 +53,8 @@ int bqfc_compr(struct qfb_c *out_c, mpz_t a, mpz_t b)
     return 0;
 }
 
-int bqfc_decompr(mpz_t out_a, mpz_t out_b, const mpz_t D, const struct qfb_c *c)
+int bqfc_decompr(mpz_t out_a, mpz_t out_b, const mpz_t D, const struct qfb_c *c,
+                 bool strict)
 {
     int ret = 0;
     mpz_t tmp, t, t_inv, d;
@@ -110,23 +115,46 @@ int bqfc_decompr(mpz_t out_a, mpz_t out_b, const mpz_t D, const struct qfb_c *c)
         mpz_neg(out_b, out_b);
     }
 
+    /*
+     * Reject if |b| > a.  For a reduced form, |b| <= a must hold.  If b0 is
+     * inflated (e.g. b0 = canonical_b0 + 4k for k != 0) the decoded b lands
+     * outside this range even though bqfc_verify_canon would otherwise pass
+     * (the self-consistency check encode(decode(X))==X is satisfied for any
+     * b0 ≡ canonical_b0 mod (a/gcd(a,t))).
+     *
+     * When strict == true this makes the canonical-check a proper uniqueness
+     * gate.  When false we preserve the historical (pre-2026) behaviour for
+     * consensus compatibility.
+     */
+    if (strict && mpz_cmpabs(out_b, out_a) > 0) {
+        ret = -1;
+        goto out;
+    }
+
 out:
     mpz_clears(tmp, t, t_inv, d, NULL);
     return ret;
 }
 
-static void bqfc_export(uint8_t *out_str, size_t *offset, size_t size,
+static int bqfc_export(uint8_t *out_str, size_t *offset, size_t size,
         const mpz_t n)
 {
-    size_t bytes;
+    size_t bytes = 0;
+    const size_t bits = (size_t)mpz_sizeinbase(n, 2);
+    const size_t needed_bytes = (bits + 7) / 8;
 
-    // mpz_export can overflow out_str if reduction bug but this should never happen
+    if (needed_bytes > size) {
+        return -1;
+    }
+
     mpz_export(&out_str[*offset], &bytes, -1, 1, 0, 0, n);
-    if (bytes > size)
-        gmp_printf("bqfc_export overflow offset %d size %d n %Zd\n", *offset, size, n);
+    if (bytes > size) {
+        return -1;
+    }
     if (bytes < size)
         memset(&out_str[*offset + bytes], 0, size - bytes);
     *offset += size;
+    return 0;
 }
 
 enum BQFC_FLAG_BITS {
@@ -166,19 +194,29 @@ int bqfc_serialize_only(uint8_t *out_str, const struct qfb_c *c, size_t d_bits)
 {
     size_t offset, g_size;
 
+    if (d_bits == 0 || d_bits > BQFC_MAX_D_BITS)
+        return -1;
     d_bits = (d_bits + 31) & ~(size_t)31;
+    if (d_bits > BQFC_MAX_D_BITS)
+        return -1;
 
     out_str[0] = (uint8_t)c->b_sign << BQFC_B_SIGN_BIT;
     out_str[0] |= (mpz_sgn(c->t) < 0 ? 1 : 0) << BQFC_T_SIGN_BIT;
     g_size = (mpz_sizeinbase(c->g, 2) + 7) / 8 - 1;
-    out_str[1] = g_size;
+    if (g_size > UCHAR_MAX)
+        return -1;
+    out_str[1] = (uint8_t)g_size;
     offset = 2;
 
-    bqfc_export(out_str, &offset, d_bits / 16 - g_size, c->a);
-    bqfc_export(out_str, &offset, d_bits / 32 - g_size, c->t);
+    if (bqfc_export(out_str, &offset, d_bits / 16 - g_size, c->a))
+        return -1;
+    if (bqfc_export(out_str, &offset, d_bits / 32 - g_size, c->t))
+        return -1;
 
-    bqfc_export(out_str, &offset, g_size + 1, c->g);
-    bqfc_export(out_str, &offset, g_size + 1, c->b0);
+    if (bqfc_export(out_str, &offset, g_size + 1, c->g))
+        return -1;
+    if (bqfc_export(out_str, &offset, g_size + 1, c->b0))
+        return -1;
 
     return 0;
 }
@@ -187,7 +225,11 @@ int bqfc_deserialize_only(struct qfb_c *out_c, const uint8_t *str, size_t d_bits
 {
     size_t offset, bytes, g_size;
 
+    if (d_bits == 0 || d_bits > BQFC_MAX_D_BITS)
+        return -1;
     d_bits = (d_bits + 31) & ~(size_t)31;
+    if (d_bits > BQFC_MAX_D_BITS)
+        return -1;
 
     g_size = str[1];
     if (g_size >= d_bits / 32)
@@ -219,7 +261,12 @@ int bqfc_deserialize_only(struct qfb_c *out_c, const uint8_t *str, size_t d_bits
 
 int bqfc_get_compr_size(size_t d_bits)
 {
-    return (d_bits + 31) / 32 * 3 + 4;
+    if (d_bits == 0 || d_bits > BQFC_MAX_D_BITS)
+        return -1;
+    size_t size = (d_bits + 31) / 32 * 3 + 4;
+    if (size > INT_MAX)
+        return -1;
+    return (int)size;
 }
 
 int bqfc_serialize(uint8_t *out_str, mpz_t a, mpz_t b, size_t d_bits)
@@ -227,6 +274,8 @@ int bqfc_serialize(uint8_t *out_str, mpz_t a, mpz_t b, size_t d_bits)
     struct qfb_c f_c;
     int ret;
     int valid_size = bqfc_get_compr_size(d_bits);
+    if (valid_size <= 0 || valid_size > BQFC_FORM_SIZE)
+        return -1;
 
     if (!mpz_cmp_ui(b, 1) && mpz_cmp_ui(a, 2) <= 0) {
         out_str[0] = !mpz_cmp_ui(a, 2) ? BQFC_IS_GEN : BQFC_IS_1;
@@ -258,11 +307,14 @@ static int bqfc_verify_canon(mpz_t a, mpz_t b, const uint8_t *str, size_t d_bits
     return memcmp(canon_str, str, BQFC_FORM_SIZE);
 }
 
-int bqfc_deserialize(mpz_t out_a, mpz_t out_b, const mpz_t D, const uint8_t *str, size_t size, size_t d_bits)
+int bqfc_deserialize(mpz_t out_a, mpz_t out_b, const mpz_t D, const uint8_t *str,
+                     size_t size, size_t d_bits, bool strict)
 {
     struct qfb_c f_c;
     int ret;
 
+    if (d_bits == 0 || d_bits > BQFC_MAX_D_BITS)
+        return -1;
     if (size != BQFC_FORM_SIZE)
         return -1;
 
@@ -279,7 +331,7 @@ int bqfc_deserialize(mpz_t out_a, mpz_t out_b, const mpz_t D, const uint8_t *str
     if (ret)
         goto out;
 
-    ret = bqfc_decompr(out_a, out_b, D, &f_c);
+    ret = bqfc_decompr(out_a, out_b, D, &f_c, strict);
     if (ret)
         goto out;
 

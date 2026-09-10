@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 use cmake::Config;
@@ -10,6 +11,9 @@ fn main() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
+    let is_fuzzing = std::env::var("CARGO_CFG_FUZZING").is_ok();
+    let is_debug_build = std::env::var_os("OPT_LEVEL").unwrap_or("".into()) == "0";
+
     let mut src_dir = manifest_dir.join("cpp");
     if !src_dir.exists() {
         src_dir = manifest_dir
@@ -19,12 +23,33 @@ fn main() {
             .to_path_buf();
     }
 
-    let dst = Config::new(src_dir.as_path())
+    let mut config = Config::new(src_dir.as_path());
+    config
         .build_target("chikvdfc_static")
         .define("BUILD_CHIKVDFC", "ON")
         .env("BUILD_VDF_CLIENT", "N")
         .define("BUILD_PYTHON", "OFF")
-        .build();
+        .define(
+            "HARDENING",
+            if is_fuzzing || is_debug_build {
+                "ON"
+            } else {
+                "OFF"
+            },
+        );
+
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    if target_os == "windows" && target_env == "msvc" {
+        // Rust MSVC links against msvcrt in both debug/release test builds.
+        // Keep CMake-produced static libs on the same CRT to avoid *_dbg unresolved symbols.
+        config
+            .define("CMAKE_POLICY_DEFAULT_CMP0091", "NEW")
+            .define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreadedDLL");
+    }
+
+    let dst = config.build();
 
     println!("cargo:rustc-link-lib=static=chikvdfc");
 
@@ -37,7 +62,7 @@ fn main() {
             .unwrap()
     );
 
-    if cfg!(target_os = "windows") {
+    if target_os == "windows" {
         println!("cargo:rustc-link-lib=static=mpir");
         println!(
             "cargo:rustc-link-search=native={}",
@@ -48,6 +73,14 @@ fn main() {
                 .to_str()
                 .unwrap()
         );
+    } else if target_os == "macos" {
+        println!("cargo:rustc-link-lib=static=gmp");
+        let homebrew_path = if fs::metadata("/opt/homebrew").is_ok() {
+            "/opt/homebrew/lib"
+        } else {
+            "/usr/local/lib"
+        };
+        println!("cargo:rustc-link-search=native={homebrew_path}");
     } else {
         println!("cargo:rustc-link-lib=gmp");
     }

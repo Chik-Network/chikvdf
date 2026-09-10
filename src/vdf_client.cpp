@@ -1,11 +1,16 @@
 #include <boost/asio.hpp>
 #include "vdf.h"
+#include "version.hpp"
+#include "vdf_client_session.h"
 #include <atomic>
 
 using boost::asio::ip::tcp;
 
-const int max_length = 2048;
 std::mutex socket_mutex;
+namespace {
+constexpr int kIterationHeaderDigits = 2;
+constexpr int kMaxIterationDigits = 20;
+}  // namespace
 
 // Segments are 2^16, 2^18, ..., 2^30
 // Best case it'll be able to proof for up to 2^36 due to 64-wesolowski restriction.
@@ -16,12 +21,6 @@ void PrintInfo(std::string input) {
     std::cout << "VDF Client: " << input << "\n";
     std::cout << std::flush;
 }
-
-char disc[350];
-char disc_size[5];
-int disc_int_size;
-
-uint8_t initial_form_s[BQFC_FORM_SIZE];
 
 void WriteProof(uint64_t iteration, Proof& result, tcp::socket& sock) {
     // Writes the number of iterations
@@ -79,26 +78,8 @@ void CreateAndWriteProofTwoWeso(integer& D, form f, uint64_t iters, TwoWesolowsk
     WriteProof(iters, result, sock);
 }
 
-void InitSession(tcp::socket& sock) {
-    boost::system::error_code error;
-
-    memset(disc, 0x00, sizeof(disc)); // For null termination
-    memset(disc_size, 0x00, sizeof(disc_size)); // For null termination
-
-    boost::asio::read(sock, boost::asio::buffer(disc_size, 3), error);
-    disc_int_size = atoi(disc_size);
-    boost::asio::read(sock, boost::asio::buffer(disc, disc_int_size), error);
-
-    char form_size;
-    boost::asio::read(sock, boost::asio::buffer(&form_size, 1), error);
-    boost::asio::read(sock, boost::asio::buffer(initial_form_s, form_size), error);
-
-    if (error == boost::asio::error::eof)
-        return ; // Connection closed cleanly by peer.
-    else if (error)
-        throw boost::system::system_error(error); // Some other error.
-
-    if (getenv("warn_on_corruption_in_production") != nullptr) {
+void ConfigureSessionRuntime() {
+    if (env_flag("warn_on_corruption_in_production")) {
         warn_on_corruption_in_production = true;
     }
     if (is_vdf_test) {
@@ -124,7 +105,9 @@ void FinishSession(tcp::socket& sock) {
         char ack[5];
         memset(ack, 0x00, sizeof(ack));
         boost::asio::read(sock, boost::asio::buffer(ack, 3), error);
-        assert (strncmp(ack, "ACK", 3) == 0);
+        if (strncmp(ack, "ACK", 3) != 0) {
+            throw std::runtime_error("Invalid stop ACK");
+        }
     } catch (std::exception& e) {
         PrintInfo("Exception in thread: " + to_string(e.what()));
     }
@@ -132,20 +115,47 @@ void FinishSession(tcp::socket& sock) {
 
 uint64_t ReadIteration(tcp::socket& sock) {
     boost::system::error_code error;
-    char data[20];
-    memset(data, 0, sizeof(data));
-    boost::asio::read(sock, boost::asio::buffer(data, 2), error);
-    int size = (data[0] - '0') * 10 + (data[1] - '0');
+    char size_buf[kIterationHeaderDigits];
+    memset(size_buf, 0, sizeof(size_buf));
+    boost::asio::read(sock, boost::asio::buffer(size_buf, kIterationHeaderDigits), error);
+    if (error) {
+        throw std::runtime_error("Failed to read iteration size header");
+    }
+    if (size_buf[0] < '0' || size_buf[0] > '9' || size_buf[1] < '0' || size_buf[1] > '9') {
+        throw std::runtime_error("Iteration size header must be decimal digits");
+    }
+
+    int size = (size_buf[0] - '0') * 10 + (size_buf[1] - '0');
+    if (size == 0) {
+        return 0;
+    }
+    if (size > kMaxIterationDigits) {
+        throw std::runtime_error("Invalid iteration size");
+    }
+
+    char data[kMaxIterationDigits];
     memset(data, 0, sizeof(data));
     boost::asio::read(sock, boost::asio::buffer(data, size), error);
+    if (error) {
+        throw std::runtime_error("Failed to read iteration body");
+    }
     uint64_t iters = 0;
-    for (int i = 0; i < size; i++)
-        iters = iters * 10 + data[i] - '0';
+    for (int i = 0; i < size; i++) {
+        if (data[i] < '0' || data[i] > '9') {
+            throw std::runtime_error("Iteration body must be decimal digits");
+        }
+        const uint64_t digit = static_cast<uint64_t>(data[i] - '0');
+        if (iters > (std::numeric_limits<uint64_t>::max() - digit) / 10) {
+            throw std::runtime_error("Iteration value overflow");
+        }
+        iters = iters * 10 + digit;
+    }
     return iters;
 }
 
 void SessionFastAlgorithm(tcp::socket& sock) {
     InitSession(sock);
+    ConfigureSessionRuntime();
     try {
         integer D(disc);
         integer L = root(-D, 4);
@@ -194,6 +204,7 @@ void SessionFastAlgorithm(tcp::socket& sock) {
 
 void SessionOneWeso(tcp::socket& sock) {
     InitSession(sock);
+    ConfigureSessionRuntime();
     try {
         integer D(disc);
         integer L = root(-D, 4);
@@ -230,6 +241,7 @@ void SessionOneWeso(tcp::socket& sock) {
 void SessionTwoWeso(tcp::socket& sock) {
     const int kMaxProcessesAllowed = 100;
     InitSession(sock);
+    ConfigureSessionRuntime();
     try {
         integer D(disc);
         integer L = root(-D, 4);
@@ -312,6 +324,10 @@ int gcd_128_max_iter = 3;
 
 int main(int argc, char* argv[]) try {
     init_gmp();
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        PrintCliVersion(argv[0]);
+        return 0;
+    }
     if (argc != 4) {
       std::cerr << "Usage: ./vdf_client <host> <port> <counter>\n";
       return 1;

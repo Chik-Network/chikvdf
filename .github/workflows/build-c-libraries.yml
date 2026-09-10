@@ -30,17 +30,17 @@ jobs:
           - name: macOS
             matrix: macos
             runs-on:
-              arm: [macos-14]
-              intel: [macos-15-intel]
+              arm: macos-15
+              intel: macos-15-intel
           - name: Ubuntu
             matrix: ubuntu
             runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
+              arm: ubuntu-24.04-arm
+              intel: ubuntu-latest
           - name: Windows
             matrix: windows
             runs-on:
-              intel: [windows-latest]
+              intel: windows-latest
         arch:
           - name: ARM
             matrix: arm
@@ -55,7 +55,7 @@ jobs:
               name: Windows
               matrix: windows
               runs-on:
-                intel: [windows-latest]
+                intel: windows-latest
             arch:
               name: ARM
               matrix: arm
@@ -65,7 +65,7 @@ jobs:
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
@@ -76,7 +76,7 @@ jobs:
 
     - name: Checkout mpir for windows
       if: matrix.os.matrix == 'windows'
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         repository: Chik-Network/mpir_gc_x64
         fetch-depth: 1
@@ -91,7 +91,7 @@ jobs:
         cmake --build .
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: c-libraries-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}
         path: ./src/lib
@@ -118,7 +118,7 @@ jobs:
         Compress-Archive -Path ${{ env.DIST_DIR }}/* -Destination chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}.zip
 
     - name: Upload zip as artifact
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}
         path: |

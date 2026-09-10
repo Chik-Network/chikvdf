@@ -5,20 +5,38 @@
 #include "nucomp.h"
 #include "picosha2.h"
 #include "proof_common.h"
+#include "checked_cast.h"
 #include <sys/stat.h>
+#include <limits>
 
 
 // TODO: Refactor to use 'Prover' class once new_vdf is merged in.
 
 void ApproximateParameters(uint64_t T, int& l, int& k) {
+    auto checked_double_to_int = [](double value) -> int {
+        if (!std::isfinite(value) || value < static_cast<double>(std::numeric_limits<int>::min()) ||
+            value > static_cast<double>(std::numeric_limits<int>::max())) {
+            throw std::overflow_error("ApproximateParameters: value out of range for int");
+        }
+        return checked_cast<int>(static_cast<int64_t>(value));
+    };
+
     double log_memory = 23.25349666;
     double log_T = log2(T);
     l = 1;
     if (log_T - log_memory > 0.000001) {
-        l = ceil(pow(2, log_memory - 20));
+        const double l_estimate = ceil(pow(2, log_memory - 20));
+        l = checked_double_to_int(l_estimate);
     }
     double intermediate = T * (double)0.6931471 / (2.0 * l);
-    k = std::max(std::round(log(intermediate) - log(log(intermediate)) + 0.25), 1.0);
+    if (intermediate <= 1.0) {
+        // For tiny iteration counts, the asymptotic estimate is undefined
+        // (log(log(intermediate)) domain). Keep parameters minimal and valid.
+        k = 1;
+        return;
+    }
+    const double k_estimate = std::max(std::round(log(intermediate) - log(log(intermediate)) + 0.25), 1.0);
+    k = checked_double_to_int(k_estimate);
 }
 
 uint64_t GetBlock(uint64_t i, uint64_t k, uint64_t T, integer& B) {
@@ -64,7 +82,8 @@ form GenerateWesolowski(form &y, form &x_init,
             for (uint64_t b0 = 0; b0 < (1ULL << k0); b0++) {
                 nucomp_form(z, z, ys[b1 * (1ULL << k0) + b0], D, L);
             }
-            z = FastPowFormNucomp(z, D, integer(b1 * (1 << k0)), L, reducer);
+            const uint64 shift_base = (uint64(1) << k0);
+            z = FastPowFormNucomp(z, D, integer(static_cast<uint64>(b1) * shift_base), L, reducer);
             nucomp_form(x, x, z, D, L);
         }
         for (uint64_t b0 = 0; b0 < (1ULL << k0); b0++) {

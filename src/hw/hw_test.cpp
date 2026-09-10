@@ -15,11 +15,11 @@
 #include "hw_proof.hpp"
 #include "vdf_base.hpp"
 #include "bqfc.h"
+#include "version.hpp"
 
 #include <cfenv>
+#include <cstring>
 #include <thread>
-
-#include <unistd.h>
 
 static const char *discrs[] = {
     "-0xac566497f63870a7b661f5482f47336cd1aa85ab43914828b7998f255916729c2ad965bcf7fe231721d96706ea7d823ed4adf663a0263714bb80144aebafcdd2915b6c7ef68c2d19447be83e7f39b4a7442640914053d2e7d6a561aa29b9449c815717af7da97a823798f402d073901a1f2bd8cd879b8b1afe2496649197021f",
@@ -39,7 +39,6 @@ int hw_test_main(int argc, char **argv)
 {
     uint64_t n_iters = 1000000;
     uint8_t n_vdfs = 3;
-    uint8_t n_completed = 0;
     uint8_t vdfs_mask;
     uint8_t init_form[BQFC_FORM_SIZE] = { 0x08 };
     struct vdf_state vdfs[N_HW_VDFS];
@@ -50,6 +49,11 @@ int hw_test_main(int argc, char **argv)
     ChikDriver *drv;
     uint64_t read_cnt = 0;
     uint32_t temp_period = chik_vdf_is_emu ? 200 : 2000;
+
+    if (argc == 2 && !strcmp(argv[1], "--version")) {
+        PrintCliVersion(argv[0]);
+        return 0;
+    }
 
     if (argc > 1) {
         n_vdfs = strtoul(argv[1], NULL, 0);
@@ -89,7 +93,6 @@ int hw_test_main(int argc, char **argv)
             if (vdfs[i].completed && (vdfs_mask & (1 << i))) {
                 stop_hw_vdf(drv, i);
                 vdfs_mask &= ~(1 << i);
-                n_completed++;
                 proofs[i].iters = n_iters;
                 proofs[i].seg_iters = n_iters;
                 proof_threads[i] = std::thread(hw_compute_proof, &vdfs[i], SIZE_MAX, &proofs[i], 255);
@@ -100,7 +103,7 @@ int hw_test_main(int argc, char **argv)
             //break;
         //}
         if (chik_vdf_is_emu) {
-            usleep(50000);
+            vdf_usleep(50000);
         }
         read_cnt++;
     }

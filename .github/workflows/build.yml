@@ -30,26 +30,26 @@ jobs:
           - name: macOS
             matrix: macos
             runs-on:
-              arm: [macos-14]
-              intel: [macos-15-intel]
+              arm: macos-15
+              intel: macos-15-intel
             cibw-archs-macos:
               arm: arm64
               intel: x86_64
           - name: Ubuntu
             matrix: ubuntu
             runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
+              arm: ubuntu-24.04-arm
+              intel: ubuntu-latest
           - name: Windows
             matrix: windows
             runs-on:
-              intel: [windows-latest]
+              intel: windows-latest
         python:
           - major-dot-minor: '3.10'
             cibw-build: 'cp310-*'
             manylinux: manylinux_2_28
             matrix: '3.10'
-            cibuildwheel: 'cibuildwheel==2.23.3'
+            cibuildwheel: 'cibuildwheel==3.2.1'
           - major-dot-minor: '3.11'
             cibw-build: 'cp311-*'
             manylinux: manylinux_2_28
@@ -84,7 +84,7 @@ jobs:
               name: Windows
               matrix: windows
               runs-on:
-                intel: [windows-latest]
+                intel: windows-latest
             arch:
               name: ARM
               matrix: arm
@@ -94,65 +94,80 @@ jobs:
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - uses: Chik-Network/actions/setup-python@main
       with:
-        python-version: ${{ matrix.python.major-dot-minor }}
+        # cibuildwheel v3 requires Python >= 3.11 for the build host.
+        # Keep wheel target selection via CIBW_BUILD so cp310 wheels still build.
+        python-version: '3.12'
 
     - name: Install pipx
       run: |
         pip install pipx
 
-    - name: Build and test
+    - name: Build and test (Linux)
+      if: matrix.os.matrix == 'ubuntu'
       env:
         CIBW_BUILD: ${{ matrix.python.cibw-build }}
         CIBW_MANYLINUX_AARCH64_IMAGE: ${{ matrix.python.manylinux }}
         CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.python.manylinux }}
+        CIBW_ENABLE: cpython-prerelease
+      run:
+        pipx run --spec=${{ matrix.python.cibuildwheel }} cibuildwheel --output-dir dist 2>&1
+
+    - name: Build and test (macOS)
+      if: matrix.os.matrix == 'macos'
+      env:
+        CIBW_BUILD: ${{ matrix.python.cibw-build }}
         CIBW_ARCHS_MACOS: ${{ matrix.os.cibw-archs-macos[matrix.arch.matrix] }}
-        CIBW_PRERELEASE_PYTHONS: True
+        CIBW_ENABLE: cpython-prerelease
+      run:
+        pipx run --spec=${{ matrix.python.cibuildwheel }} cibuildwheel --output-dir dist 2>&1
+
+    - name: Build and test (Windows)
+      if: matrix.os.matrix == 'windows'
+      env:
+        # pipx warns when its home path contains spaces (common on Windows runners).
+        # Use a fixed no-space location to avoid pipx path compatibility issues.
+        PIPX_HOME: 'C:\pipx'
+        PIPX_BIN_DIR: 'C:\pipx\bin'
+        # setuptools/cibuildwheel on Windows can emit a benign RuntimeWarning:
+        # "Config variable 'Py_DEBUG' is unset, Python ABI tag may be incorrect".
+        # PYTHONWARNINGS uses literal message matching (not regex), so match a
+        # stable prefix and avoid punctuation-sensitive full-text matching.
+        # TODO: Revisit periodically and remove once upstream tooling no longer
+        # emits this warning in our Windows wheel builds.
+        PYTHONWARNINGS: "ignore:Config variable 'Py_DEBUG' is unset:RuntimeWarning"
+        CIBW_BUILD: ${{ matrix.python.cibw-build }}
+        CIBW_ENABLE: cpython-prerelease
       run:
         pipx run --spec=${{ matrix.python.cibuildwheel }} cibuildwheel --output-dir dist 2>&1
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
         name: packages-${{ matrix.os.name }}-${{ matrix.python.major-dot-minor }}-${{ matrix.arch.name }}
         path: ./dist
 
   build-sdist:
-    name: sdist - ${{ matrix.os.name }} ${{ matrix.python.major-dot-minor }} ${{ matrix.arch.name }}
-    runs-on: ${{ matrix.os.runs-on[matrix.arch.matrix] }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - name: Ubuntu
-            matrix: ubuntu
-            runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
-        python:
-          - major-dot-minor: '3.12'
-            matrix: '3.12'
-        arch:
-          - name: Intel
-            matrix: intel
+    name: sdist - Ubuntu 3.12 Intel
+    runs-on: ubuntu-latest
 
     steps:
     - name: Clean workspace
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - uses: Chik-Network/actions/setup-python@main
       with:
-        python-version: ${{ matrix.python.major-dot-minor }}
+        python-version: '3.12'
 
     - name: Build source distribution
       run: |
@@ -160,82 +175,65 @@ jobs:
         python -m build --sdist --outdir dist .
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@v7
       with:
-        name: packages-sdist-${{ matrix.os.name }}-${{ matrix.python.major-dot-minor }}-${{ matrix.arch.name }}
+        name: packages-sdist-Ubuntu-3.12-Intel
         path: ./dist
 
   check:
-    name: Check - ${{ matrix.os.name }} ${{ matrix.python.major-dot-minor }} ${{ matrix.arch.name }}
-    runs-on: ${{ matrix.os.runs-on[matrix.arch.matrix] }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - name: Ubuntu
-            matrix: ubuntu
-            runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
-        python:
-          - major-dot-minor: '3.12'
-            matrix: '3.12'
-        arch:
-          - name: Intel
-            matrix: intel
+    name: Check - Ubuntu 3.12 Intel
+    runs-on: ubuntu-latest
 
     steps:
     - name: Clean workspace
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
     - uses: Chik-Network/actions/setup-python@main
       with:
-        python-version: ${{ matrix.python.major-dot-minor }}
+        python-version: '3.12'
+
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake libgmp-dev libgmpxx4ldbl
 
     - name: flake8
       run: |
         pip install flake8
-        flake8 tests setup.py
+        flake8 tests setup.py chikvdf
 
     - name: mypy
       run: |
         pip install mypy
-        mypy --config-file mypi.ini setup.py tests
+        mypy --config-file mypi.ini setup.py tests chikvdf
+
+    - name: stubtest
+      env:
+        BUILD_VDF_CLIENT: N
+      run: |
+        pip install mypy
+        pip install .
+        stubtest --concise chikvdf
 
   upload:
-    name: Upload to PyPI - ${{ matrix.os.name }} ${{ matrix.python.major-dot-minor }} ${{ matrix.arch.name }}
-    runs-on: ${{ matrix.os.runs-on[matrix.arch.matrix] }}
+    name: Upload to PyPI - Ubuntu 3.12 Intel
+    runs-on: ubuntu-latest
     needs:
       - build-wheels
       - build-sdist
       - check
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - name: Ubuntu
-            matrix: ubuntu
-            runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
-        python:
-          - major-dot-minor: '3.12'
-            matrix: '3.12'
-        arch:
-          - name: Intel
-            matrix: intel
 
     steps:
     - name: Clean workspace
       uses: Chik-Network/actions/clean-workspace@main
 
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0
 
@@ -246,10 +244,10 @@ jobs:
 
     - uses: Chik-Network/actions/setup-python@main
       with:
-        python-version: ${{ matrix.python.major-dot-minor }}
+        python-version: '3.12'
 
     - name: Download artifacts
-      uses: actions/download-artifact@v6
+      uses: actions/download-artifact@v8
       with:
         merge-multiple: true
         pattern: packages-*

@@ -2,6 +2,12 @@
 #define CALLBACK_H
 
 #include "util.h"
+#include "nudupl_listener.h"
+#include <algorithm>
+#include <atomic>
+#include <limits>
+#include <mutex>
+#include <stdexcept>
 
 // Applies to n-weso.
 const int kWindowSize = 20;
@@ -32,6 +38,7 @@ public:
         switch(type) {
             case NL_SQUARESTATE:
             {
+#if (defined(ARCH_X86) || defined(ARCH_X64)) && !defined(CHIK_DISABLE_ASM)
                 //cout << "NL_SQUARESTATE" << endl;
                 uint64 res;
 
@@ -39,6 +46,11 @@ public:
 
                 if(!square_state->assign(mulf->a, mulf->b, mulf->c, res))
                     cout << "square_state->assign failed" << endl;
+#else
+                // Phased pipeline is x86/x64-only.
+                (void)data;
+                cout << "NL_SQUARESTATE unsupported on this architecture" << endl;
+#endif
                 break;
             }
             case NL_FORM:
@@ -63,6 +75,7 @@ public:
     virtual void OnIteration(int type, void *data, uint64_t iteration) = 0;
 
     std::unique_ptr<form[]> forms;
+    size_t forms_capacity = 0;
     std::atomic<int64_t> iterations{0};
     integer D;
     integer L;
@@ -81,9 +94,21 @@ class OneWesolowskiCallback: public WesolowskiCallback {
             k = 10;
             l = 1;
         }
-        kl = k * l;
-        uint64_t space_needed = wanted_iter / (k * l) + 100;
-        forms.reset(new form[space_needed]);
+        const uint64_t step = static_cast<uint64_t>(k) * static_cast<uint64_t>(l);
+        if (step == 0) {
+            throw std::overflow_error("OneWesolowskiCallback invalid checkpoint stride");
+        }
+        if (step > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            throw std::overflow_error("OneWesolowskiCallback checkpoint stride too large");
+        }
+        kl = static_cast<uint32_t>(step);
+
+        const uint64_t space_needed = wanted_iter / step + 100;
+        if (space_needed > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+            throw std::overflow_error("OneWesolowskiCallback forms capacity overflow");
+        }
+        forms_capacity = static_cast<size_t>(space_needed);
+        forms.reset(new form[forms_capacity]);
         forms[0] = f;
     }
 
@@ -93,7 +118,10 @@ class OneWesolowskiCallback: public WesolowskiCallback {
             return ;
 
         if (iteration % kl == 0) {
-            uint64_t pos = iteration / kl;
+            const size_t pos = static_cast<size_t>(iteration / kl);
+            if (pos >= forms_capacity) {
+                throw std::runtime_error("OneWesolowskiCallback::OnIteration out of bounds");
+            }
             form* mulf = &forms[pos];
             SetForm(type, data, mulf);
         }
@@ -109,63 +137,144 @@ class OneWesolowskiCallback: public WesolowskiCallback {
 
 class TwoWesolowskiCallback: public WesolowskiCallback {
   public:
-    TwoWesolowskiCallback(integer& D, form f) : WesolowskiCallback(D) {
-        int space_needed = kSwitchIters / 10 + (kMaxItersAllowed - kSwitchIters) / 100;
+    TwoWesolowskiCallback(integer& D, const form& f) : WesolowskiCallback(D) {
+        const uint64_t early_points = static_cast<uint64_t>(kSwitchIters) / 10;
+        const uint64_t late_points =
+            (static_cast<uint64_t>(kMaxItersAllowed) - static_cast<uint64_t>(kSwitchIters)) / 100;
+        const size_t space_needed = static_cast<size_t>(early_points + late_points);
+        forms_capacity = space_needed;
         forms.reset(new form[space_needed]);
         forms[0] = f;
-        kl = 10;
-        switch_iters = -1;
+        kl.store(10, std::memory_order_relaxed);
+        transition_state.store(EncodeTransitionState(/*switch_index=*/0, /*switch_iters=*/-1), std::memory_order_relaxed);
     }
 
     void IncreaseConstants(uint64_t num_iters) {
-        kl = 100;
-        switch_iters = num_iters;
-        switch_index = num_iters / 10;
+        std::lock_guard<std::mutex> lk(forms_mutex);
+        // Publish transition metadata first. `kl` is only a fast-path hint.
+        transition_state.store(
+            EncodeTransitionState(num_iters / 10, static_cast<int64_t>(num_iters)),
+            std::memory_order_release
+        );
+        kl.store(100, std::memory_order_release);
     }
 
-    int GetPosition(uint64_t power) {
-        if (switch_iters == -1 || power < switch_iters) {
-            return power / 10;
-        } else {
-            return (switch_index + (power - switch_iters) / 100);
+    size_t GetPosition(uint64_t power) {
+        std::lock_guard<std::mutex> lk(forms_mutex);
+        return GetPositionUnlocked(power);
+    }
+
+    size_t GetPositionUnlocked(uint64_t power) const {
+        const uint64_t snapshot = transition_state.load(std::memory_order_acquire);
+        return GetPositionFromSnapshot(power, snapshot);
+    }
+
+    form GetFormCopy(uint64_t power) {
+        std::lock_guard<std::mutex> lk(forms_mutex);
+        const size_t pos = GetPositionUnlocked(power);
+        if (pos >= forms_capacity) {
+            throw std::runtime_error("TwoWesolowskiCallback::GetFormCopy out of bounds");
         }
-    }
-
-    form *GetForm(uint64_t power) {
-        return &(forms[GetPosition(power)]);
+        return forms[pos];
     }
 
     bool LargeConstants() {
-        return kl == 100;
+        const uint64_t snapshot = transition_state.load(std::memory_order_acquire);
+        return DecodeSwitchIters(snapshot) != -1;
     }
 
     void OnIteration(int type, void *data, uint64_t iteration) {
         iteration++;
-        if (iteration % kl == 0) {
-            uint64_t pos = GetPosition(iteration);
-            form* mulf = &forms[pos];
-            SetForm(type, data, mulf);
+        // Most iterations are not checkpoints. Avoid mutex lock/unlock on that hot path.
+        const uint32_t current_kl = kl.load(std::memory_order_relaxed);
+        if (iteration % current_kl != 0) {
+            return;
         }
+
+        std::lock_guard<std::mutex> lk(forms_mutex);
+        const uint64_t snapshot = transition_state.load(std::memory_order_acquire);
+        const uint32_t effective_kl = GetEffectiveKl(iteration, snapshot);
+        if (iteration % effective_kl != 0) {
+            return;
+        }
+        const size_t pos = GetPositionFromSnapshot(iteration, snapshot);
+        if (pos >= forms_capacity) {
+            throw std::runtime_error("TwoWesolowskiCallback::OnIteration out of bounds");
+        }
+        form* mulf = &forms[pos];
+        SetForm(type, data, mulf);
     }
 
   private:
-    uint64_t switch_index;
-    int64_t switch_iters;
-    uint32_t kl;
+    static uint64_t EncodeTransitionState(uint64_t switch_index_value, int64_t switch_iters_value) {
+        if (switch_index_value > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+            throw std::overflow_error("TwoWesolowskiCallback switch_index overflow");
+        }
+        // Persist switch_iters in 32 bits with +1 encoding to represent -1 (unset) as 0.
+        if (switch_iters_value < -1 ||
+            switch_iters_value > static_cast<int64_t>(std::numeric_limits<uint32_t>::max() - 1)) {
+            throw std::overflow_error("TwoWesolowskiCallback switch_iters overflow");
+        }
+        const uint32_t encoded_iters = static_cast<uint32_t>(switch_iters_value + 1);
+        return (static_cast<uint64_t>(encoded_iters) << 32) |
+               static_cast<uint64_t>(static_cast<uint32_t>(switch_index_value));
+    }
+
+    static uint64_t DecodeSwitchIndex(uint64_t state) {
+        return static_cast<uint64_t>(state & 0xffffffffULL);
+    }
+
+    static int64_t DecodeSwitchIters(uint64_t state) {
+        const uint32_t encoded_iters = static_cast<uint32_t>(state >> 32);
+        return static_cast<int64_t>(encoded_iters) - 1;
+    }
+
+    static uint32_t GetEffectiveKl(uint64_t power, uint64_t state) {
+        const int64_t current_switch_iters = DecodeSwitchIters(state);
+        return (current_switch_iters == -1 || power < static_cast<uint64_t>(current_switch_iters)) ? 10U : 100U;
+    }
+
+    static size_t GetPositionFromSnapshot(uint64_t power, uint64_t state) {
+        const int64_t current_switch_iters = DecodeSwitchIters(state);
+        if (current_switch_iters == -1 || power < static_cast<uint64_t>(current_switch_iters)) {
+            return static_cast<size_t>(power / 10);
+        }
+        const uint64_t current_switch_index = DecodeSwitchIndex(state);
+        return static_cast<size_t>(
+            current_switch_index + (power - static_cast<uint64_t>(current_switch_iters)) / 100
+        );
+    }
+
+    std::atomic<uint64_t> transition_state{0};
+    std::atomic<uint32_t> kl{10};
+    std::mutex forms_mutex;
 };
 
 class FastAlgorithmCallback : public WesolowskiCallback {
   public:
     FastAlgorithmCallback(int segments, integer& D, form f, bool multi_proc_machine) : WesolowskiCallback(D) {
+        if (segments < 1) {
+            throw std::invalid_argument("FastAlgorithmCallback requires at least one segment");
+        }
+
         buckets_begin.push_back(0);
-        buckets_begin.push_back(bucket_size1 * window_size);
         this->segments = segments;
         this->multi_proc_machine = multi_proc_machine;
-        for (int i = 0; i < segments - 2; i++) {
-            buckets_begin.push_back(buckets_begin[buckets_begin.size() - 1] + bucket_size2 * window_size);
+        if (segments > 1) {
+            buckets_begin.push_back(bucket_size1 * window_size);
         }
-        int space_needed = window_size * (bucket_size1 + bucket_size2 * (segments - 1));
-        forms.reset(new form[space_needed]);
+        for (int i = 2; i < segments; i++) {
+            buckets_begin.push_back(buckets_begin.back() + bucket_size2 * window_size);
+        }
+        const uint64_t per_window =
+            static_cast<uint64_t>(bucket_size1) +
+            static_cast<uint64_t>(bucket_size2) * static_cast<uint64_t>(segments - 1);
+        const uint64_t total_forms = static_cast<uint64_t>(window_size) * per_window;
+        if (total_forms > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+            throw std::overflow_error("FastAlgorithmCallback forms capacity overflow");
+        }
+        forms_capacity = static_cast<size_t>(total_forms);
+        forms.reset(new form[forms_capacity]);
         checkpoints.reset(new form[1 << 18]);
 
         y_ret = f;

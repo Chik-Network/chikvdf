@@ -2,6 +2,11 @@
 #include "verifier.h"
 #include "create_discriminant.h"
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
+#include <vector>
+#include <chrono>
 
 int segments = 7;
 int thread_count = 3;
@@ -39,7 +44,7 @@ int main() {
     std::vector<uint8_t> challenge_hash({0, 0, 1, 2, 3, 3, 4, 4});
     integer D = CreateDiscriminant(challenge_hash, 1024);
 
-    if (getenv( "warn_on_corruption_in_production" )!=nullptr) {
+    if (env_flag("warn_on_corruption_in_production")) {
         warn_on_corruption_in_production=true;
     }
     set_rounding_mode();
@@ -49,7 +54,7 @@ int main() {
     bool multi_proc_machine = (std::thread::hardware_concurrency() >= 16) ? true : false;
 
     WesolowskiCallback* weso = new FastAlgorithmCallback(segments, D, f, multi_proc_machine);
-    std::cout << "Discriminant: " << D.impl << "\n";
+    std::cout << "Discriminant: " << D.to_string() << "\n";
     std::atomic<bool> stopped = false;
     fast_algorithm = true;
     FastStorage* fast_storage = NULL;
@@ -60,10 +65,31 @@ int main() {
     ProverManager pm(D, (FastAlgorithmCallback*)weso, fast_storage, segments, thread_count);
     pm.start();
     std::vector<std::thread> threads;
-    for (int i = 0; i <= 30; i++) {
-        threads.emplace_back(CreateProof, D, std::ref(pm), (1 << 21) * i + 60000);
+
+    // This binary is used by CI as a correctness test. Historically it also served as a 5-minute
+    // soak/stress test; that dominates the wall-clock runtime of the "all tests" run.
+    //
+    // Default behavior: run the historical long/soak test.
+    // Fast/CI-friendly mode: set `CHIKVDF_PROVER_TEST_FAST=1` to run just a few proofs and exit.
+    const bool fast_mode = env_flag("CHIKVDF_PROVER_TEST_FAST");
+    // CI detection should be based on variable presence, not truthiness.
+    const bool is_ci = env_exists("CI") || env_exists("GITHUB_ACTIONS");
+
+    if (!fast_mode) {
+        for (int i = 0; i <= 30; i++) {
+            threads.emplace_back(CreateProof, D, std::ref(pm), (1ULL << 21) * uint64_t(i) + 60000);
+        }
+        std::this_thread::sleep_for(std::chrono::seconds(300));
+    } else {
+        // Keep iterations small enough to complete quickly on CI runners.
+        const int max_i = is_ci ? 3 : 6;
+        for (int i = 0; i < max_i; i++) {
+            threads.emplace_back(CreateProof, D, std::ref(pm), (1ULL << 18) * uint64_t(i) + 60000);
+        }
+        for (auto& t : threads) t.join();
+        threads.clear();
     }
-    std::this_thread::sleep_for (std::chrono::seconds(300));
+
     stop_signal = true;
     std::cout << "Stopping everything.\n";
     pm.stop();

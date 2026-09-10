@@ -1,17 +1,58 @@
 UNAME := $(shell uname)
+# Allow callers/CI to override ARCH, otherwise detect from host.
+ARCH ?= $(shell uname -m)
+ARCH_CANON := $(ARCH)
+ifeq ($(ARCH_CANON),amd64)
+ARCH_CANON := x86_64
+else ifeq ($(ARCH_CANON),arm64)
+ARCH_CANON := aarch64
+endif
+GIT_DESCRIBE := $(strip $(shell git describe --tags --always 2>/dev/null))
+CHIKVDF_VERSION ?= $(if $(GIT_DESCRIBE),$(GIT_DESCRIBE),dev)
 
 ifneq (,$(findstring clang, $(shell $(CXX) --version)))
 NOPIE = -fno-PIE
+LTO_FLAGS = -flto
 else
 NOPIE = -no-pie
+LTO_FLAGS = -flto=auto
+endif
+# Windows builds don't use PIE flags.
+ifeq ($(OS),Windows_NT)
+NOPIE =
+endif
+# macOS linker warns that -no_pie is deprecated; omit across Darwin targets.
+ifeq ($(UNAME),Darwin)
+NOPIE =
 endif
 
-LDFLAGS += -flto $(NOPIE) -g
+CFLAGS += $(LTO_FLAGS) $(NOPIE)
+LDFLAGS += $(LTO_FLAGS) $(NOPIE) -g
+ifeq ($(OS),Windows_NT)
+# 128-bit integer backend: CMake sets CHIKVDF_USE_UINT128_T_FALLBACK on Windows CI builds.
+LDLIBS += -lmpirxx -lmpir -lws2_32
+CXXFLAGS += $(LTO_FLAGS) -std=c++1z -D VDF_MODE=0 -D FAST_MACHINE=1 $(NOPIE) -fvisibility=hidden
+else
 LDLIBS += -lgmpxx -lgmp -pthread
-CXXFLAGS += -flto -std=c++1z -D VDF_MODE=0 -D FAST_MACHINE=1 -pthread $(NOPIE) -fvisibility=hidden
+CXXFLAGS += $(LTO_FLAGS) -std=c++1z -D VDF_MODE=0 -D FAST_MACHINE=1 -pthread $(NOPIE) -fvisibility=hidden
+endif
 ifeq ($(UNAME),Darwin)
 CXXFLAGS += -D CHIKOSX=1
+LDFLAGS += -Wl,-headerpad_max_install_names
+# Homebrew (common on macOS) installs boost/gmp to /opt/homebrew or /usr/local
+ifneq ($(wildcard /opt/homebrew/include/boost/asio.hpp),)
+CXXFLAGS += -I/opt/homebrew/include
+CFLAGS += -I/opt/homebrew/include
+LDFLAGS += -L/opt/homebrew/lib
 endif
+ifneq ($(wildcard /usr/local/include/boost/asio.hpp),)
+CXXFLAGS += -I/usr/local/include
+CFLAGS += -I/usr/local/include
+LDFLAGS += -L/usr/local/lib
+endif
+endif
+
+CXXFLAGS += -DCHIKVDF_VERSION=\"$(CHIKVDF_VERSION)\"
 
 OPT_CFLAGS = -O3 -g
 
@@ -23,9 +64,20 @@ endif
 ifneq ($(TSAN),)
 LDFLAGS += -fsanitize=thread
 CXXFLAGS += -g -fsanitize=thread
+ifneq (,$(findstring clang, $(shell $(CXX) --version)))
+else
+CXXFLAGS += -Wno-tsan
+endif
 endif
 
 .PHONY: all clean
+
+# Only x86_64 builds use the x86 asm objects
+ifeq ($(ARCH_CANON),x86_64)
+ASM_OBJS = asm_compiled.o avx2_asm_compiled.o avx512_asm_compiled.o
+else
+ASM_OBJS =
+endif
 
 BINS = vdf_client prover_test 1weso_test 2weso_test vdf_bench
 all: $(BINS)
@@ -33,13 +85,13 @@ all: $(BINS)
 clean:
 	rm -f *.o hw/*.o $(BINS) compile_asm emu_hw_test hw_test hw_vdf_client emu_hw_vdf_client
 
-$(BINS) avx512_test: %: %.o lzcnt.o asm_compiled.o avx2_asm_compiled.o avx512_asm_compiled.o
+$(BINS) avx512_test: %: %.o lzcnt.o $(ASM_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 $(addsuffix .o,$(BINS)) avx512_test.o: CXXFLAGS += $(OPT_CFLAGS)
 
 lzcnt.o: refcode/lzcnt.c
-	$(CC) -c refcode/lzcnt.c
+	$(CC) $(CFLAGS) -c refcode/lzcnt.c
 
 asm_compiled.s: compile_asm
 	./compile_asm
@@ -53,17 +105,42 @@ avx512_asm_compiled.s: compile_asm
 compile_asm: compile_asm.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-HW_OBJS = $(addprefix hw/,hw_util.o hw_proof.o hw_interface.o chik_driver.o ftdi_driver.o vdf_driver.o pll_freqs.o) vdf_base.o lzcnt.o
+HW_OBJS = $(addprefix hw/,hw_util.o hw_proof.o hw_interface.o chik_driver.o ftdi_driver.o vdf_driver.o pll_freqs.o) vdf_base_hw.o vdf_hw_symbol_anchors.o prover_runtime.o lzcnt.o
 EMU_OBJS = hw/emu_funcs.o hw/emu_runner.o
-HW_LIB = hw/libft4222/build-x86_64/libft4222.so
+ifeq ($(OS),Windows_NT)
+HW_LIB = hw/libft4222/libft4222.lib
+HW_FTD2XX_LIB = hw/libft4222/ftd2xx.lib
+HW_LIBS = $(HW_LIB) $(HW_FTD2XX_LIB)
+else
+ifeq ($(UNAME),Darwin)
+HW_LIB = hw/libft4222/libft4222.dylib
+HW_FTD2XX_LIB = hw/libft4222/libftd2xx.dylib
+HW_LIBS = $(HW_LIB) $(HW_FTD2XX_LIB)
+else
+ifeq ($(ARCH_CANON),x86_64)
+HW_LIB_DIR = build-x86_64
+else ifeq ($(ARCH_CANON),aarch64)
+HW_LIB_DIR = build-arm-v8
+else
+$(error Unsupported Linux architecture for FT4222 hardware tools: $(ARCH). Expected one of: x86_64, aarch64/arm64, amd64)
+endif
+HW_LIB = hw/libft4222/$(HW_LIB_DIR)/libft4222.so
+HW_LIBS = $(HW_LIB)
+endif
+endif
 
-hw_test: hw/hw_test.o $(HW_OBJS) $(HW_LIB) hw/real_hw.o
+ifeq ($(UNAME),Darwin)
+# Ensure HW client binaries can locate USB driver dylibs bundled in-tree.
+hw_test hw_vdf_client: LDFLAGS += -Wl,-rpath,@executable_path/hw/libft4222
+endif
+
+hw_test: hw/hw_test.o $(HW_OBJS) $(HW_LIBS) hw/real_hw.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 emu_hw_test: hw/hw_test.o $(HW_OBJS) $(EMU_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
-hw_vdf_client: hw/hw_vdf_client.o $(HW_OBJS) $(HW_LIB) hw/real_hw.o
+hw_vdf_client: hw/hw_vdf_client.o $(HW_OBJS) $(HW_LIBS) hw/real_hw.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 emu_hw_vdf_client: hw/hw_vdf_client.o $(HW_OBJS) $(EMU_OBJS)

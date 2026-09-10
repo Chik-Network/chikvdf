@@ -1,17 +1,22 @@
 #include "include.h"
+#include <chrono>
 #include "bit_manipulation.h"
 #include "double_utility.h"
 #include "parameters.h"
-#include "asm_main.h"
 #include "integer.h"
+#include "alloc.hpp"
 #include "vdf_new.h"
 #include "nucomp.h"
 #include "picosha2.h"
 #include "proof_common.h"
+#include "version.hpp"
 
+#if (defined(ARCH_X86) || defined(ARCH_X64)) && !defined(CHIK_DISABLE_ASM)
+#include "asm_main.h"
 #include "threading.h"
 #include "avx512_integer.h"
 #include "vdf_fast.h"
+#endif
 #include "create_discriminant.h"
 
 #include <cstdlib>
@@ -28,6 +33,11 @@ int main(int argc, char **argv)
     assert(is_vdf_test); //assertions should be disabled in VDF_MODE==0
     init_gmp();
     set_rounding_mode();
+
+    if (argc == 2 && !strcmp(argv[1], "--version")) {
+        PrintCliVersion(argv[0]);
+        return 0;
+    }
 
     if (argc < 3) {
         usage(argv[0]);
@@ -46,6 +56,7 @@ int main(int argc, char **argv)
     auto t1 = std::chrono::high_resolution_clock::now();
     if (!strcmp(argv[1], "square_asm")) {
         is_asm = true;
+#if (defined(ARCH_X86) || defined(ARCH_X64)) && !defined(CHIK_DISABLE_ASM)
         for (i = 0; i < iters; ) {
             square_state_type sq_state;
             sq_state.pairindex = 0;
@@ -64,6 +75,17 @@ int main(int argc, char **argv)
                 i += done;
             }
         }
+#else
+        // On non-x86 architectures we don't build the phased/asm pipeline.
+        // Keep script compatibility by treating `square_asm` as a NUDUPL benchmark.
+        for (i = 0; i < iters; i++) {
+            nudupl_form(y, y, D, L);
+            if (__GMP_ABS(y.a.impl->_mp_size) > 8) {
+                reducer.reduce(y);
+            }
+        }
+        is_asm = false;
+#endif
     } else if (!strcmp(argv[1], "square")) {
         for (i = 0; i < iters; i++) {
             nudupl_form(y, y, D, L);

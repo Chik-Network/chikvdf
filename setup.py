@@ -1,20 +1,15 @@
 import os
 import platform
-import shutil
 import subprocess
 import sys
+from collections.abc import Callable
+from pathlib import Path
 
 from setuptools import Command, Extension, setup
 from setuptools.command.build import build
 from setuptools.command.build_ext import build_ext
-from setuptools.command.install import install
 
-BUILD_HOOKS = []
-INSTALL_HOOKS = []
-
-
-def add_install_hook(hook):
-    INSTALL_HOOKS.append(hook)
+BUILD_HOOKS: list[Callable[..., None]] = []
 
 
 def add_build_hook(hook):
@@ -27,27 +22,18 @@ class HookCommand(Command):
         Command.__init__(self, dist)
 
     def initialize_options(self, *args):
-        self.install_dir = None
         self.build_dir = None
 
     def finalize_options(self):
         self.set_undefined_options("build", ("build_scripts", "build_dir"))
-        self.set_undefined_options(
-            "install",
-            ("install_platlib", "install_dir"),
-        )
 
     def run(self):
         for _ in self.hooks:
-            _(install_dir=self.install_dir, build_dir=self.build_dir)
+            _(build_dir=self.build_dir)
 
 
 class build_hook(HookCommand):
     hooks = BUILD_HOOKS
-
-
-class install_hook(HookCommand):
-    hooks = INSTALL_HOOKS
 
 
 ############################################
@@ -57,17 +43,6 @@ class CMakeExtension(Extension):
     def __init__(self, name, sourcedir=""):
         Extension.__init__(self, name, sources=["./"])
         self.sourcedir = os.path.abspath(sourcedir)
-
-
-def copy_vdf_client(build_dir, install_dir):
-    shutil.copy("src/vdf_client", install_dir)
-    shutil.copy("src/prover_test", install_dir)
-    shutil.copy("src/1weso_test", install_dir)
-    shutil.copy("src/2weso_test", install_dir)
-
-
-def copy_vdf_bench(build_dir, install_dir):
-    shutil.copy("src/vdf_bench", install_dir)
 
 
 def invoke_make(**kwargs):
@@ -80,12 +55,6 @@ BUILD_VDF_BENCH = os.getenv("BUILD_VDF_BENCH", "N") == "Y"
 
 if BUILD_VDF_CLIENT or BUILD_VDF_BENCH:
     add_build_hook(invoke_make)
-
-if BUILD_VDF_CLIENT:
-    add_install_hook(copy_vdf_client)
-
-if BUILD_VDF_BENCH:
-    add_install_hook(copy_vdf_bench)
 
 
 class CMakeBuild(build_ext):
@@ -106,7 +75,7 @@ class CMakeBuild(build_ext):
         extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
         cmake_args = [
             "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + str(extdir),
-            "-DPYTHON_EXECUTABLE=" + sys.executable,
+            "-DPython_EXECUTABLE=" + sys.executable,
         ]
 
         cfg = "Debug" if self.debug else "Release"
@@ -132,7 +101,11 @@ class CMakeBuild(build_ext):
 
 
 build.sub_commands.append(("build_hook", lambda x: True))  # type: ignore
-install.sub_commands.append(("install_hook", lambda x: True))
+
+# Wheel metadata generation on Windows can run with a non-UTF8 default encoding.
+# Read `README.md` explicitly as UTF-8 so `long_description` is robust across runners.
+_readme_path = Path(__file__).resolve().parent / "README.md"
+_long_description = _readme_path.read_text(encoding="utf-8")
 
 setup(
     name="chikvdf",
@@ -140,13 +113,13 @@ setup(
     author_email="florin@chiknetwork.com",
     description="Chik vdf verification (wraps C++)",
     license="Apache-2.0",
-    python_requires=">=3.9",
-    long_description=open("README.md").read(),
+    python_requires=">=3.10, <4",
+    long_description=_long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/Chik-Network/chikvdf",
-    ext_modules=[CMakeExtension("chikvdf", "src")],
-    cmdclass=dict(
-        build_ext=CMakeBuild, install_hook=install_hook, build_hook=build_hook
-    ),
+    packages=["chikvdf"],
+    package_data={"chikvdf": ["py.typed", "__init__.pyi"]},
+    ext_modules=[CMakeExtension("chikvdf._chikvdf", "src")],
+    cmdclass=dict(build_ext=CMakeBuild, build_hook=build_hook),
     zip_safe=False,
 )

@@ -9,7 +9,6 @@
 
 #include <stdexcept>
 #include <cstring>
-#include <unistd.h>
 
 #define REG_BYTES 4
 #define CHIK_VDF_JOB_SIZE (CHIK_VDF_CMD_START_REG_OFFSET - \

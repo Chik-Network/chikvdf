@@ -16,7 +16,9 @@ void divide_table(reg_alloc regs, reg_scalar a, reg_scalar b, reg_scalar q, reg_
     static bool outputted_table=false;
 
     if (!outputted_table) {
-#ifdef CHIKOSX
+#ifdef CHIK_WINDOWS
+        APPEND_M(str( ".section .rdata,\"dr\"" ));
+#elif defined(CHIKOSX)
         APPEND_M(str( ".text " ));
 #else
         APPEND_M(str( ".text 1" ));
@@ -57,7 +59,7 @@ void divide_table(reg_alloc regs, reg_scalar a, reg_scalar b, reg_scalar q, reg_
     APPEND_M(str( "#:", b_shift_label ));
 
     APPEND_M(str( "SARX RAX, `b, `q" )); // b_approx = b>>b_shift
-#ifdef CHIKOSX
+#if defined(CHIKOSX) || defined(CHIK_WINDOWS)
     APPEND_M(str( "LEA RCX, [RIP+divide_table]" )); // b_approx_inverse = divide_table[b_approx]
     APPEND_M(str( "MOV RAX, [RCX+RAX*8]"));
 #else

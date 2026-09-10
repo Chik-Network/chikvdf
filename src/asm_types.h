@@ -417,7 +417,7 @@ struct reg_vector {
     int value=-1;
 
     reg_vector() {}
-    explicit reg_vector(int i, int t_default_num_bits) : value(i), default_num_bits(t_default_num_bits) {}
+    explicit reg_vector(int i, int t_default_num_bits) : default_num_bits(t_default_num_bits), value(i) {}
 
     string name(int num_bits=512) const {
         assert(value>=0);
@@ -460,12 +460,20 @@ struct reg_spill {
     reg_spill(int t_value, int t_size, int t_alignment) : value(t_value), size(t_size), alignment(t_alignment) {}
 
     int get_rsp_offset() const {
+#ifdef CHIK_WINDOWS
+        return value + 8;
+#else
         return value-spill_bytes;
+#endif
     }
 
     //this is negative
     uint64 get_rsp_offset_uint64() const {
+#ifdef CHIK_WINDOWS
+        return uint64(value + 8);
+#else
         return uint64(value-spill_bytes);
+#endif
     }
 
     string name() const {
@@ -473,13 +481,21 @@ struct reg_spill {
         assert(value%alignment==0);
         assert(value+size<=spill_bytes);
 
+#ifdef CHIK_WINDOWS
+        return str( "[RSP+#]", to_hex(value + 8) );
+#else
         return str( "[RSP+#]", to_hex(value-spill_bytes) );
+#endif
     }
 
     typedef void bindable;
     void bind_impl(expand_macros& m, string n) const {
         m.bind_impl(n, name());
+#ifdef CHIK_WINDOWS
+        m.bind_impl(n + "_rsp_offset", to_hex(value + 8));
+#else
         m.bind_impl(n + "_rsp_offset", to_hex(value-spill_bytes));
+#endif
     }
 
     reg_spill operator+(int byte_offset) const {

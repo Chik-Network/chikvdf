@@ -1,5 +1,4 @@
 #include "emu_runner.hpp"
-#include "libft4222.h"
 
 //#include "verifier.h"
 //#include "bit_manipulation.h"
@@ -9,6 +8,25 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+
+#include "libft4222.h"
+
+#ifdef _WIN32
+// Ensure local emulator function definitions are emitted without dllimport.
+#ifdef FTD2XX_API
+#undef FTD2XX_API
+#define FTD2XX_API
+#endif
+#ifdef LIBFT4222_API
+#undef LIBFT4222_API
+#define LIBFT4222_API
+#endif
+#endif
+
+#if defined(_WIN32) && defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winconsistent-dllimport"
+#endif
 
 int chik_vdf_is_emu = 1;
 
@@ -28,7 +46,11 @@ FTD2XX_API FT_STATUS WINAPI FT_GetDeviceInfoList(
     *lpdwNumDevs = 1;
 
     pDest->Type = FT_DEVICE_4222H_0;
-    strcpy(pDest->Description, "A");
+#ifdef _WIN32
+    strcpy_s(pDest->Description, sizeof(pDest->Description), "A");
+#else
+    snprintf(pDest->Description, sizeof(pDest->Description), "%s", "A");
+#endif
     pDest->LocId = EMU_LOC_ID;
 
     return 0;
@@ -144,3 +166,7 @@ LIBFT4222_API FT4222_STATUS FT4222_I2CMaster_WriteEx(FT_HANDLE ftHandle, uint16 
         return FT4222_IO_ERROR;
     }
 }
+
+#if defined(_WIN32) && defined(__clang__)
+#pragma clang diagnostic pop
+#endif

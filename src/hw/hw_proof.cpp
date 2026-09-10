@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <unistd.h>
 
 static const uint32_t g_chkp_thres = 1000000;
 static const uint32_t g_skip_thres = 10;
@@ -474,13 +473,13 @@ void hw_proof_wait_values(struct vdf_state *vdf, bool finish_work)
 {
     if (finish_work) {
         while (!vdf->wq.empty()) {
-            usleep(100000);
+            vdf_usleep(100000);
             hw_proof_process_work(vdf);
         }
     }
 
     while (vdf->aux_threads_busy) {
-        usleep(10000);
+        vdf_usleep(10000);
     }
 
     if (!finish_work) {
@@ -495,7 +494,7 @@ void hw_proof_wait_values(struct vdf_state *vdf, bool finish_work)
 int hw_proof_wait_value(struct vdf_state *vdf, size_t pos)
 {
     while (!(vdf->valid_values[pos / 8] & (1 << (pos % 8)))) {
-        usleep(100000);
+        vdf_usleep(100000);
         if (vdf->stopping) {
             return -1;
         }
@@ -577,13 +576,13 @@ class HwProver : public ParallelProver {
         pos_offset = segm.start / vdf->interval;
     }
 
-    form* GetForm(uint64_t pos) {
+    form GetForm(uint64_t pos) {
         pos += pos_offset;
         if (hw_proof_wait_value(vdf, pos)) {
             // Provide arbitrary value when stopping - proof won't be computed
-            return &vdf->values[0][0];
+            return vdf->values[0][0];
         }
-        return hw_proof_value_at(vdf, pos);
+        return *hw_proof_value_at(vdf, pos);
     }
 
     void start() {
@@ -822,7 +821,7 @@ void init_vdf_state(struct vdf_state *vdf, struct vdf_proof_opts *opts, const ch
     init_vdf_value(&vdf->last_val);
     // TODO: verify validity of initial form
     bqfc_deserialize(vdf->last_val.a, vdf->last_val.b, vdf->D.impl, init_form,
-            BQFC_FORM_SIZE, BQFC_MAX_D_BITS);
+            BQFC_FORM_SIZE, BQFC_MAX_D_BITS, false);
     hw_proof_get_form(hw_proof_value_at(vdf, 0), vdf, &vdf->last_val);
     vdf->valid_values[0] = 1 << 0;
     //vdf->raw_values.push_back(initial);

@@ -20,27 +20,51 @@ permissions:
 
 jobs:
   fuzz_targets:
-    name: Run fuzzers
+    name: Run fuzzers (${{ matrix.target }})
     runs-on: ubuntu-latest
     env:
       CARGO_PROFILE_RELEASE_LTO: false
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - create_discriminant
+          - prove
+          - verify
+          - verify_n_wesolowski
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
 
-      - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz
+      - name: Cache cargo registry + build artifacts
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            rust_bindings/fuzz/corpus
+          key: ${{ runner.os }}-rust-fuzz-${{ hashFiles('Cargo.lock') }}
 
-      - name: Cargo fuzz
+      - name: Install cargo-fuzz
+        run: |
+          if ! command -v cargo-fuzz >/dev/null 2>&1; then
+            # cargo-fuzz's lockfile can lag nightly compatibility; fall back to
+            # unlocked dependency resolution when --locked fails.
+            cargo +nightly install cargo-fuzz --locked || cargo +nightly install cargo-fuzz
+          fi
+
+      - name: Cargo fuzz (${{ matrix.target }})
         run: |
           cd rust_bindings
-          cargo fuzz list | xargs -I "%" sh -c "cargo +nightly fuzz run % -- -max_total_time=600 || exit 255"
+          cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time=600
 
   lint:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -64,20 +88,20 @@ jobs:
           - name: macOS
             matrix: macos
             runs-on:
-              arm: [macos-14]
-              intel: [macos-15-intel]
+              arm: macos-15
+              intel: macos-15-intel
             cibw-archs-macos:
               arm: arm64
               intel: x86_64
           - name: Ubuntu
             matrix: ubuntu
             runs-on:
-              arm: [Linux, ARM64]
-              intel: [ubuntu-latest]
+              arm: ubuntu-24.04-arm
+              intel: ubuntu-latest
           - name: Windows
             matrix: windows
             runs-on:
-              intel: [windows-latest]
+              intel: windows-latest
 
         arch:
           - name: ARM
@@ -90,17 +114,34 @@ jobs:
               name: Windows
               matrix: windows
               runs-on:
-                intel: [windows-latest]
+                intel: windows-latest
             arch:
               name: ARM
               matrix: arm
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Setup library path on MacOS
         if: matrix.os.name == 'macOS'
         run: echo "LIBRARY_PATH=$(brew --prefix)/lib:$LIBRARY_PATH" >> $GITHUB_ENV
+
+      - name: Install CMake on MacOS
+        if: matrix.os.name == 'macOS'
+        run: |
+          brew ls --versions cmake >/dev/null 2>&1 || brew install cmake
+          CMAKE_BIN="$(brew --prefix cmake)/bin"
+          if [ -d "$CMAKE_BIN" ]; then
+            echo "$CMAKE_BIN" >> "$GITHUB_PATH"
+            export PATH="$CMAKE_BIN:$PATH"
+          fi
+          if ! command -v cmake >/dev/null 2>&1; then
+            BREW_BIN="$(brew --prefix)/bin"
+            echo "$BREW_BIN" >> "$GITHUB_PATH"
+            export PATH="$BREW_BIN:$PATH"
+          fi
+          command -v cmake
+          cmake --version
 
       - name: Install MPIR on Windows
         if: matrix.os.name == 'Windows'
@@ -110,7 +151,10 @@ jobs:
 
       - name: Install libclang-dev on Linux
         if: matrix.os.name == 'Ubuntu'
-        run: sudo apt-get install libclang-dev -y
+        run: |
+          # Avoid transient 404s from stale apt indices / mirror lag.
+          sudo apt-get update -y -o Acquire::Retries=3
+          sudo apt-get install libclang-dev -y
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -126,7 +170,7 @@ jobs:
       fail-fast: false
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -146,7 +190,7 @@ jobs:
         run: cargo publish --dry-run -p chikvdf --allow-dirty
 
       - name: Upload crate artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: crate
           path: ./target/package/*-*.crate
@@ -156,7 +200,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: rust-lang/crates-io-auth-action@v1
+      - uses: rust-lang/crates-io-auth-action@v1.0.5
         if: env.RELEASE == 'true'
         id: auth
 

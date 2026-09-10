@@ -37,6 +37,7 @@ src/hw_vdf_client
 /verifier
 /verifier_test
 /build/*
+/build-*/
 *.whl
 *.egg-info
 *.o
@@ -44,6 +45,7 @@ src/hw_vdf_client
 
 # external library
 /src/hw/libft4222
+/src/libft4222/
 
 # pyenv
 .python-version
@@ -62,3 +64,4 @@ src/cmake-build-debug/
 # Rust
 /target
 .vscode
+src/build/

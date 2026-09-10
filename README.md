@@ -36,13 +36,46 @@ MacOS and Linux, chikvdf can be used to compile vdf_client and vdf_bench.
 vdf_client is the core VDF process that completes the Proof of Time submitted
 to it by the Timelord. The repo also includes a benchmarking tool to get a
 sense of the iterations per second of a given CPU called vdf_bench. Try
-`./vdf_bench square_asm 250000` for an ips estimate.
+`./vdf_bench square_asm 250000` for an ips estimate on x86/x64 (phased/asm
+pipeline). On non-x86 architectures, use `./vdf_bench square 250000` (NUDUPL).
+Set `CHIKVDF_LOG_AVX=1` to emit AVX feature detection logs during startup.
 
-To build vdf_client set the environment variable BUILD_VDF_CLIENT to "Y".
-`export BUILD_VDF_CLIENT=Y`.
+For direct CMake builds, the following options are available:
 
-Similarly, to build vdf_bench set the environment variable BUILD_VDF_BENCH to
-"Y". `export BUILD_VDF_BENCH=Y`.
+- `BUILD_VDF_CLIENT` - build `vdf_client`
+- `BUILD_VDF_BENCH` - build `vdf_bench`
+- `BUILD_VDF_TESTS` - build test binaries (`1weso_test`, `2weso_test`, `prover_test`) and CTest/GoogleTest targets (for example `vdf_client_session_test`)
+- `BUILD_HW_TOOLS` - build hardware timelord tools
+- `ENABLE_GNU_ASM` - enable GNU-style asm pipeline on x86/x64 (enabled by default)
+- `GENERATE_ASM_TRACKING_DATA` - enable `track_asm()` instrumentation in generated asm (off by default to avoid hot-loop overhead)
+
+Example:
+
+```bash
+cmake -S src -B build \
+  -DBUILD_PYTHON=OFF \
+  -DBUILD_CHIKVDFC=OFF \
+  -DBUILD_VDF_CLIENT=ON \
+  -DBUILD_VDF_BENCH=ON \
+  -DBUILD_VDF_TESTS=ON
+cmake --build build --target vdf_client vdf_bench 1weso_test 2weso_test prover_test vdf_client_session_test
+```
+
+For the legacy `setup.py` + `Makefile.vdf-client` flow (used by wheel hooks),
+you can control native binary builds with environment variables:
+
+- `BUILD_VDF_CLIENT=Y` to include `vdf_client` (and related test binaries)
+- `BUILD_VDF_BENCH=Y` to include `vdf_bench`
+For direct CMake builds, use `-DBUILD_*` flags instead of these environment variables.
+
+AVX runtime flags:
+
+- `CHIKVDF_LOG_AVX=1`: emit AVX detection logs at startup
+- `CHIK_DISABLE_AVX2=1`: disable AVX2 path even when supported
+- `CHIK_FORCE_AVX2=1`: force AVX2 path
+- `CHIK_DISABLE_AVX512_IFMA=1`: disable AVX-512 IFMA path
+- `CHIK_ENABLE_AVX512_IFMA=1`: enable AVX-512 IFMA path when CPUID support is present
+- `CHIK_FORCE_AVX512_IFMA=1`: force AVX-512 IFMA path
 
 This is currently automated via pip in the
 [install-timelord.sh](https://github.com/Chik-Network/chik-blockchain/blob/master/install-timelord.sh)
@@ -59,6 +92,40 @@ If you're running a timelord, the following tests are available, depending of wh
 `./prover_test`, in case you're running a timelord that extends the chain and you're running the fast algorithm.
 
 Those tests will simulate the vdf_client and verify for correctness the produced proofs.
+
+Note: `./prover_test` defaults to a long soak/stress run. Set
+`CHIKVDF_PROVER_TEST_FAST=1` to run a short, CI-friendly correctness check.
+
+Regression tests for specific bugs are now added with GoogleTest and run via
+CTest. Example:
+
+```bash
+cmake -S src -B build \
+  -DBUILD_PYTHON=OFF \
+  -DBUILD_CHIKVDFC=OFF \
+  -DBUILD_VDF_CLIENT=OFF \
+  -DBUILD_VDF_BENCH=OFF \
+  -DBUILD_VDF_TESTS=ON \
+  -DBUILD_HW_TOOLS=OFF
+cmake --build build --target vdf_client_session_test
+ctest --test-dir build --output-on-failure -R '^regression\.'
+```
+
+### Testing matrix
+
+- Binary integration tests (existing): `1weso_test`, `2weso_test`,
+  `prover_test`; these simulate `vdf_client` and validate proof correctness.
+- Regression tests (new): GoogleTest targets executed via CTest (for example
+  `vdf_client_session_test`, typically filtered with `ctest -R '^regression\.'`).
+- Hardware tests: standalone binaries such as `hw_test` and `emu_hw_test`
+  described in `README_ASIC.md`.
+
+## Fuzzing
+
+Fuzz targets live under `rust_bindings/fuzz`. The `prove` target includes an
+iteration cap to avoid out-of-memory conditions in CI. If you want deeper
+iteration coverage, raise the cap in `rust_bindings/fuzz/fuzz_targets/prove.rs`
+after validating memory usage and exec/s on your runner.
 
 ## Contributing and workflow
 

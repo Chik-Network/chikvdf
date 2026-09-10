@@ -7,10 +7,12 @@
 //mp_limb_t is an unsigned integer
 static_assert(sizeof(mp_limb_t)==8, "");
 
+#ifndef _WIN32
 static_assert(sizeof(unsigned long int)==8, "");
 static_assert(sizeof(long int)==8, "");
+#endif
 
-static uint64 get_time_cycles() {
+[[maybe_unused]] static uint64 get_time_cycles() {
     // Returns the time in EDX:EAX.
     uint64 high;
     uint64 low;
@@ -456,12 +458,12 @@ template<int d_expected_size, int d_padded_size> struct alignas(64) mpz {
     bool operator>(const mpz_struct* t) const { return mpz_cmp(*this, t)>0; }
     bool operator!=(const mpz_struct* t) const { return mpz_cmp(*this, t)!=0; }
 
-    bool operator<(int64 i) const { return mpz_cmp_si(*this, i)<0; }
-    bool operator<=(int64 i) const { return mpz_cmp_si(*this, i)<=0; }
-    bool operator==(int64 i) const { return mpz_cmp_si(*this, i)==0; }
-    bool operator>=(int64 i) const { return mpz_cmp_si(*this, i)>=0; }
-    bool operator>(int64 i) const { return mpz_cmp_si(*this, i)>0; }
-    bool operator!=(int64 i) const { return mpz_cmp_si(*this, i)!=0; }
+    bool operator<(int64 i) const { return mpz_cmp_si(_(), i)<0; }
+    bool operator<=(int64 i) const { return mpz_cmp_si(_(), i)<=0; }
+    bool operator==(int64 i) const { return mpz_cmp_si(_(), i)==0; }
+    bool operator>=(int64 i) const { return mpz_cmp_si(_(), i)>=0; }
+    bool operator>(int64 i) const { return mpz_cmp_si(_(), i)>0; }
+    bool operator!=(int64 i) const { return mpz_cmp_si(_(), i)!=0; }
 
     bool operator<(uint64 i) const { return mpz_cmp_ui(_(), i)<0; }
     bool operator<=(uint64 i) const { return mpz_cmp_ui(_(), i)<=0; }
@@ -789,8 +791,8 @@ template<class mpz_type> bool gcd_unsigned(
         assert((uint64(data.out_uv_addr)&63)==0); //should be cache line aligned
     }
 
-    int error_code=hasAVX2()?
-        asm_code::asm_avx2_func_gcd_unsigned(&data):
+    int error_code = hasAVX2() ?
+        asm_code::asm_avx2_func_gcd_unsigned(&data) :
         asm_code::asm_cel_func_gcd_unsigned(&data);
 
     if (error_code!=0) {
