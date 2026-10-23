@@ -671,7 +671,7 @@ jobs:
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
 
       - name: Sign Windows chikvdf executables and MPIR DLLs
-        if: '1' == '2'
+        if: 1 == 2
         uses: Chik-Network/actions/sign/azure-windows@main
         with:
           azure_tenant_id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
