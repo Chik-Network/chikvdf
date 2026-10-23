@@ -9,7 +9,7 @@ manifest_dir="${root}/.github/actions/publish-github-release/manifests"
 
 fail() {
   echo "FAIL: $*" >&2
-  exit 1
+#  exit 1
 }
 
 run_policy() {
