@@ -1,0 +1,24 @@
+# Every chikvdf client asset published to a final GitHub release.
+# A missing line fails the publish before gh runs.
+chikvdf_{tag}-1_amd64.deb
+chikvdf_{tag}-1_arm64.deb
+chikvdf-{tag}-macos-arm64.zip
+chikvdf-{tag}-macos-arm64.zip.sha256
+chikvdf-{tag}-macos-arm64.pkg
+chikvdf-{tag}-macos-arm64.pkg.sha256
+chikvdf-{tag}-macos-arm64.signing-status.txt
+chikvdf-{tag}-macos-arm64.codesign-summary.txt
+chikvdf-{tag}-macos-intel.zip
+chikvdf-{tag}-macos-intel.zip.sha256
+chikvdf-{tag}-macos-intel.pkg
+chikvdf-{tag}-macos-intel.pkg.sha256
+chikvdf-{tag}-macos-intel.signing-status.txt
+chikvdf-{tag}-macos-intel.codesign-summary.txt
+chikvdf-darwin-arm64.zip
+chikvdf-darwin-arm64.zip.sha256
+chikvdf-darwin-amd64.zip
+chikvdf-darwin-amd64.zip.sha256
+chikvdf-{tag}-windows-amd64.zip
+chikvdf-{tag}-windows-amd64.zip.sha256
+chikvdf-win64.zip
+chikvdf-win64.zip.sha256

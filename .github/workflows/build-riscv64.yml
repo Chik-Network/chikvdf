@@ -3,7 +3,7 @@ name: Build and test riscv64
 on:
   push:
     branches:
-      - main1
+      - main
   release:
     types: [published]
   pull_request:
@@ -32,8 +32,6 @@ jobs:
             emoji: 🐧
             runs-on: ubuntu-latest
         python:
-          - major-dot-minor: '3.10'
-            matrix: '3.10'
           - major-dot-minor: '3.11'
             matrix: '3.11'
           - major-dot-minor: '3.12'
@@ -105,7 +103,7 @@ jobs:
 
       - name: Configure AWS credentials
         if: env.RELEASE == 'true'
-        uses: aws-actions/configure-aws-credentials@v6.2.4
+        uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.CHIK_AWS_ACCOUNT_ID }}:role/installer-upload
           aws-region: us-west-2

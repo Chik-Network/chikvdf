@@ -3,16 +3,19 @@ name: Build C Libraries
 on:
   push:
     branches:
-    - main1
-  release:
-    types: [published]
+    - main
   pull_request:
     branches:
     - '**'
+  # Release publishing lives in build-packages.yml, which calls this workflow
+  # and attaches the archives only after every matrix has succeeded.
+  workflow_call:
 
 concurrency:
-  # SHA is added to the end if on `main` to let all main workflows run
-  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  # Literal name, not github.workflow: this file is both an entry point and a
+  # callee, and github.workflow is the caller. The same group would cancel
+  # or deadlock the release run.
+  group: build-c-libraries-${{ github.ref }}-${{ github.event_name }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -69,18 +72,10 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Set Env
-      uses: Chik-Network/actions/setjobenv@main
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Checkout mpir for windows
       if: matrix.os.matrix == 'windows'
-      uses: actions/checkout@v7
-      with:
-        repository: Chik-Network/mpir_gc_x64
-        fetch-depth: 1
-        path: mpir_gc_x64
+      shell: bash
+      run: bash scripts/get-mpir-gc-x64.sh
 
     - name: Build
       working-directory: src
@@ -123,25 +118,3 @@ jobs:
         name: chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}
         path: |
           ${{ github.workspace }}/chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}.zip
-
-    - name: Upload release artifacts
-      if: env.RELEASE == 'true'
-      shell: bash
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        gh release upload \
-          $RELEASE_TAG \
-          chikvdfc-${{ matrix.os.matrix }}-${{ matrix.arch.matrix }}.zip
-
-    - uses: Chik-Network/actions/github/jwt@main
-      if: env.RELEASE == 'true'
-
-    - name: Notify new build
-      if: env.RELEASE == 'true' && '1' == '2'
-      uses: Chik-Network/actions/github/glue@main
-      with:
-        json_data: '{"release_version":"${{ env.RELEASE_TAG }}"}'
-        glue_url: ${{ secrets.GLUE_API_URL }}
-        glue_project: "chikvdfc"
-        glue_path: "trigger"

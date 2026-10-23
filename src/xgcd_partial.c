@@ -25,6 +25,11 @@
 
 #include <gmp.h>
 #include <stdint.h>
+#include <climits>
+
+#if !defined(__MPIR_VERSION) && (LONG_MAX < INT64_MAX)
+#define CHIKVDF_GMP_NARROW_LONG 1
+#endif
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -112,6 +117,23 @@ static inline mp_limb_signed_t chikvdf_mpz_extract_uword_from_shift_nonneg(const
    return (mp_limb_signed_t)(lo | hi);
 }
 
+#if defined(CHIKVDF_GMP_NARROW_LONG)
+static_assert(sizeof(mp_limb_signed_t) == sizeof(uint64_t), "mp_limb_signed_t must be 64-bit");
+
+static inline void chikvdf_set_limb_signed(mpz_ptr rop, mp_limb_signed_t val) {
+    if (val == 0) {
+        mpz_set_ui(rop, 0);
+    } else if (val > 0) {
+        mp_limb_t u = (mp_limb_t)val;
+        mpz_import(rop, 1, -1, sizeof(mp_limb_t), 0, 0, &u);
+    } else {
+        mp_limb_t u = 0 - (mp_limb_t)val;
+        mpz_import(rop, 1, -1, sizeof(mp_limb_t), 0, 0, &u);
+        mpz_neg(rop, rop);
+    }
+}
+#endif
+
 void mpz_xgcd_partial(mpz_t co2, mpz_t co1,
                                     mpz_t r2, mpz_t r1, const mpz_t L)
 {
@@ -124,9 +146,26 @@ void mpz_xgcd_partial(mpz_t co2, mpz_t co1,
    struct chikvdf_xgcd_partial_tls {
       mpz_t q;
       mpz_t r;
+#if defined(CHIKVDF_GMP_NARROW_LONG)
+      mpz_t t_aa1;
+      mpz_t t_aa2;
+      mpz_t t_bb1;
+      mpz_t t_bb2;
 
+      chikvdf_xgcd_partial_tls() {
+         mpz_init(q); mpz_init(r);
+         mpz_init(t_aa1); mpz_init(t_aa2);
+         mpz_init(t_bb1); mpz_init(t_bb2);
+      }
+      ~chikvdf_xgcd_partial_tls() {
+         mpz_clear(q); mpz_clear(r);
+         mpz_clear(t_aa1); mpz_clear(t_aa2);
+         mpz_clear(t_bb1); mpz_clear(t_bb2);
+      }
+#else
       chikvdf_xgcd_partial_tls() { mpz_init(q); mpz_init(r); }
       ~chikvdf_xgcd_partial_tls() { mpz_clear(q); mpz_clear(r); }
+#endif
 
       chikvdf_xgcd_partial_tls(const chikvdf_xgcd_partial_tls&) = delete;
       chikvdf_xgcd_partial_tls& operator=(const chikvdf_xgcd_partial_tls&) = delete;
@@ -187,6 +226,26 @@ void mpz_xgcd_partial(mpz_t co2, mpz_t co1,
          mpz_swap(co2, co1);
       } else
       {
+#if defined(CHIKVDF_GMP_NARROW_LONG)
+         chikvdf_set_limb_signed(tls.t_bb2, bb2);
+         chikvdf_set_limb_signed(tls.t_aa2, aa2);
+         chikvdf_set_limb_signed(tls.t_aa1, aa1);
+         chikvdf_set_limb_signed(tls.t_bb1, bb1);
+
+         mpz_mul(r, r2, tls.t_bb2);
+         mpz_addmul(r, r1, tls.t_aa2);
+
+         mpz_mul(r1, r1, tls.t_aa1);
+         mpz_addmul(r1, r2, tls.t_bb1);
+         mpz_set(r2, r);
+
+         mpz_mul(r, co2, tls.t_bb2);
+         mpz_addmul(r, co1, tls.t_aa2);
+
+         mpz_mul(co1, co1, tls.t_aa1);
+         mpz_addmul(co1, co2, tls.t_bb1);
+         mpz_set(co2, r);
+#else
          mpz_mul_si(r, r2, bb2);
          if (aa2 >= 0)
             mpz_addmul_ui(r, r1, aa2);
@@ -197,7 +256,8 @@ void mpz_xgcd_partial(mpz_t co2, mpz_t co1,
             mpz_addmul_ui(r1, r2, bb1);
          else
             mpz_submul_ui(r1, r2, -bb1);
-         mpz_set(r2, r);
+         // The old r2 is no longer needed; reuse its allocation as scratch.
+         mpz_swap(r2, r);
 
          mpz_mul_si(r, co2, bb2);
          if (aa2 >= 0)
@@ -209,7 +269,8 @@ void mpz_xgcd_partial(mpz_t co2, mpz_t co1,
             mpz_addmul_ui(co1, co2, bb1);
          else
             mpz_submul_ui(co1, co2, -bb1);
-         mpz_set(co2, r);
+         mpz_swap(co2, r);
+#endif
 
          if (mpz_sgn(r1) < 0) { mpz_neg(co1, co1); mpz_neg(r1, r1); }
          if (mpz_sgn(r2) < 0) { mpz_neg(co2, co2); mpz_neg(r2, r2); }

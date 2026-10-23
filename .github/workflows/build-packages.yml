@@ -1,0 +1,147 @@
+name: VDF client & HW CI
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+    inputs:
+      macos_notarize:
+        description: "Notarize macOS bundles (requires Apple app, notarization, and installer secrets)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # SHA is added to the end if on `main` to let all main workflows run
+  group: ${{ github.ref }}-${{ github.workflow }}-${{ github.event_name }}-${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/heads/long_lived/')) && github.sha || '' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  CHIKVDF_LOG_AVX: "1"
+
+jobs:
+  release-policy:
+    name: Release policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      is_final: ${{ steps.policy.outputs.is_final }}
+      notarize_macos: ${{ steps.policy.outputs.notarize_macos }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: policy
+        uses: ./.github/actions/release-policy
+
+  # Release builds of the C libraries run in this workflow so one publish job
+  # can wait for them. Push and pull_request still use build-c-libraries.yml.
+  c-libraries:
+    name: C libraries
+    if: github.event_name == 'release' && github.event.action == 'published'
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/build-c-libraries.yml
+
+  # Optimized cells build the client packages and bundles. Sanitizer cells are a
+  # separate job, so a flaky ASAN or TSAN run does not hold the GitHub release.
+  package:
+    name: Package
+    needs: [release-policy]
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/build-client.yml
+    with:
+      configs: '["optimized=1"]'
+      is_final: ${{ needs.release-policy.outputs.is_final }}
+      notarize_macos: ${{ needs.release-policy.outputs.notarize_macos }}
+    secrets: inherit
+
+  sanitize:
+    name: Sanitize
+    permissions:
+      contents: write
+      id-token: write
+    uses: ./.github/workflows/build-client.yml
+    with:
+      configs: '["TSAN=1", "ASAN=1"]'
+      is_final: ${{ 'false' }}
+      notarize_macos: ${{ 'false' }}
+    secrets: inherit
+
+  # One publish for every GitHub release asset. It waits for the jobs that
+  # produce or validate those assets, not for ASAN/TSAN. A partial set is
+  # never attached.
+  publish-release:
+    name: Publish GitHub release
+    needs: [release-policy, package, c-libraries, release-publish-checks]
+    if: >-
+      needs.release-policy.result == 'success' &&
+      needs.release-policy.outputs.is_final == 'true' &&
+      needs.package.result == 'success' &&
+      needs.c-libraries.result == 'success' &&
+      needs.release-publish-checks.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download Debian packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: installer-*
+          path: release-assets/debian
+          merge-multiple: true
+
+      - name: Download macOS bundles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: macos-*-bundle
+          path: release-assets/macos
+          merge-multiple: true
+
+      - name: Download Windows bundle
+        uses: actions/download-artifact@v8
+        with:
+          pattern: windows-amd64-bundle
+          path: release-assets/windows
+          merge-multiple: true
+
+      - name: Download C library archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: chikvdfc-*
+          path: release-assets/c-libraries
+          merge-multiple: true
+
+      - name: Upload release assets and notify glue
+        uses: ./.github/actions/publish-github-release
+        with:
+          tag: ${{ github.event.release.tag_name }}
+          assets_dir: release-assets
+          manifests: chikvdf,chikvdfc
+          is_final: ${{ needs.release-policy.outputs.is_final }}
+          glue_url: ${{ secrets.GLUE_API_URL }}
+
+  release-publish-checks:
+    name: Release publish checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test release policy and publish
+        run: bash tests/test_release_publish.sh

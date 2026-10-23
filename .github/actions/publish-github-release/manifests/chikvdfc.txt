@@ -1,0 +1,6 @@
+# Every C library archive published to a final GitHub release.
+chikvdfc-macos-arm.zip
+chikvdfc-macos-intel.zip
+chikvdfc-ubuntu-arm.zip
+chikvdfc-ubuntu-intel.zip
+chikvdfc-windows-intel.zip

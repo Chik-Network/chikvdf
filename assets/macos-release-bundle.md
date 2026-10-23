@@ -1,6 +1,6 @@
-# macOS ARM64 release bundle for Homebrew
+# macOS release bundles and installer packages
 
-This repository publishes a macOS ARM64 release archive intended for Homebrew/cask consumption.
+This repository publishes macOS ARM64 and Intel release archives intended for Homebrew/cask consumption, plus a signed installer package for direct installs.
 
 ## Archive layout
 
@@ -15,22 +15,32 @@ This repository publishes a macOS ARM64 release archive intended for Homebrew/ca
   - `libft4222.dylib`
   - `libft4222.1.4.4.190.dylib`
   - `libftd2xx.dylib`
+  - versioned `libgmp` and `libgmpxx` (the sonames the binaries were linked against)
+
+## Installer package
+
+`chikvdf-<tag>-macos-<arch>.pkg` contains the same `bin/` and `libexec/chikvdf/` tree and installs it under `/usr/local`, so the `@loader_path/../libexec/chikvdf` rpath resolves to `/usr/local/libexec/chikvdf`. Uninstall with `pkgutil --forget com.chik.chikvdf` and remove the installed files.
 
 ## Dynamic library path policy
 
-- Hardware binaries may be built with a development-time rpath, then are rewritten during bundle assembly.
-- The bundle assembly step removes development-time rpaths and sets `@loader_path/../libexec/chikvdf` on macOS.
-- FTDI dylibs use `@rpath` install names.
-- CI verifies with `otool` that release binaries do not reference local absolute build paths.
+- Hardware binaries may be built with a development-time rpath of `@executable_path/hw/libft4222`.
+- `scripts/stage-macos-bundle-dylibs.sh` deletes that rpath and adds `@loader_path/../libexec/chikvdf` in the same `install_name_tool` pass that rewrites GMP install names. Dylibs do not get that rpath edit.
+- FTDI dylibs are copied into `libexec/chikvdf` with the `@rpath` install names set by `scripts/get-libft4222.sh`.
+- GMP is linked from Homebrew at build time. The same staging step copies those dylibs into `libexec/chikvdf` and rewrites their install names to `@rpath/<basename>` with `install_name_tool`.
+- Dylibs and binaries are signed together. A Developer ID signature uses `codesign --force --timestamp --options runtime`, and library validation stays enabled. When a run is neither a final release nor a notarization request, every staged Mach-O is ad-hoc signed with `codesign -s - --force` so arm64 can launch after `install_name_tool`. The `-unsigned` archive name means there is no Developer ID. `--disable-library-validation` is not used.
+- CI unzips the shipped zip, rejects any Mach-O load path or rpath under `/opt/homebrew` or `/usr/local`, and runs every executable in `scripts/macos-bundle-tools.sh` with `--version` and `DYLD_*` unset. `vdf_client` and `vdf_bench` call `init_gmp()` before printing the version. The other tools still load GMP through dyld before `--version` returns. The notary service never runs the binaries.
 
 ## Signing and notarization behavior
 
-- Release run with Apple secrets available:
-  - Sign FTDI dylibs and binaries with Developer ID.
-  - Notarize the final release zip with `notarytool`.
-- Release run without Apple secrets:
-  - Publish an unsigned fallback zip with `-unsigned` suffix.
-  - Upload a signing status metadata file with the release assets.
+- Final release or manual run with `notarize_macos` enabled:
+  - Sign vendored dylibs and binaries with Developer ID and the hardened runtime.
+  - Build the `chikvdf-<tag>-macos-<arch>.pkg` from the same staged tree and sign it with Developer ID Installer.
+  - Submit the pkg with `notarytool --wait`, then `stapler staple` and `stapler validate` it. It is the only shipped format that can carry a stapled ticket.
+  - Do not submit the zip separately. Notarization is recorded per code object (CDHash), and the pkg contains the same binaries, so Gatekeeper finds them during the zip's online lookup. A bare zip cannot be stapled.
+  - Final releases require `APPLE_DEV_ID_APP`/`APPLE_DEV_ID_APP_PASS`, `APPLE_DEV_ID_INSTALLER`/`APPLE_DEV_ID_INSTALLER_PASS`, and `APPLE_NOTARIZE_USERNAME`/`APPLE_NOTARIZE_PASSWORD`/`APPLE_TEAM_ID`. The build fails instead of publishing unsigned release assets when any are missing.
+- Run that is neither a final release nor a notarization request:
+  - Ad-hoc sign the staged Mach-O files and produce the zip and pkg with an `-unsigned` suffix as workflow artifacts.
+  - Upload a signing status metadata file with the other artifacts.
 
 ## Local development
 

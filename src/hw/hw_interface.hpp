@@ -20,7 +20,8 @@ struct vdf_value {
 extern int chik_vdf_is_emu;
 
 class ChikDriver;
-ChikDriver *init_hw(double freq, double brd_voltage);
+// device_loc is the FTDI location printed by --list; zero selects the first board.
+ChikDriver *init_hw(double freq, double brd_voltage, uint32_t device_loc = 0);
 void stop_hw(ChikDriver *drv);
 
 struct vdf_state;
