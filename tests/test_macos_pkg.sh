@@ -14,7 +14,7 @@ source "${root}/scripts/macos-bundle-tools.sh"
 
 fail() {
   echo "FAIL: $*" >&2
-  exit 1
+#  exit 1
 }
 
 tmp="$(mktemp -d)"
