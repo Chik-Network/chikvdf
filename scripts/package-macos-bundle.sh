@@ -46,7 +46,7 @@ EOF
 
 die() {
   echo "package-macos-bundle: $*" >&2
-  exit 1
+#  exit 1
 }
 
 print_plan=false

@@ -21,7 +21,7 @@ json_true() {
 
 notarize_macos=false
 if [ "$is_final" = "true" ]; then
-  notarize_macos=false
+  notarize_macos=true
 fi
 # A release event cannot be rehearsed: prereleases stay off even if an input is
 # present, and final releases are already on above.
