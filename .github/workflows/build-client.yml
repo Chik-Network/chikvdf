@@ -670,13 +670,12 @@ jobs:
           $files | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
           "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
 
-      - name: Sign Windows chikvdf executables and MPIR DLLs
-        if: 1 == 2
-        uses: Chik-Network/actions/sign/azure-windows@main
-        with:
-          azure_tenant_id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
-          azure_client_id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
-          file: ${{ steps.sign_files.outputs.files }}
+#      - name: Sign Windows chikvdf executables and MPIR DLLs
+#        uses: Chik-Network/actions/sign/azure-windows@main
+#        with:
+#          azure_tenant_id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
+#          azure_client_id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
+#          file: ${{ steps.sign_files.outputs.files }}
 
       - name: Package and verify Windows zip bundle
         shell: pwsh
