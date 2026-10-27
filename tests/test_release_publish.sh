@@ -107,7 +107,6 @@ run_publish() {
     RELEASE_TAG=$tag \
     ASSETS_DIR=$dir \
     MANIFESTS=$manifests \
-    GLUE_URL=https://glue.example \
     GITHUB_OUTPUT=$output \
     GH_CALLS=$calls \
     GH_EXIT=${GH_EXIT:-0} \
@@ -157,11 +156,8 @@ for name in "${asset_names[@]}"; do
     fail "uploaded set is missing ${name}"
   fi
 done
-if ! grep -F -q '"windows_amd64":"chikvdf-win64.zip"' "$output"; then
-  fail "chikvdf glue payload missing: $(cat "$output")"
-fi
-if ! grep -F -q "glue_chikvdfc={\"release_version\":\"${tag}\"}" "$output"; then
-  fail "chikvdfc glue payload missing: $(cat "$output")"
+if ! grep -qx 'published=true' "$output"; then
+  fail "final publish did not record published=true: $(cat "$output")"
 fi
 
 # Re-run after a successful upload still clobbers. The script has no memory of the first call.
@@ -202,7 +198,7 @@ write_tree "$assets"
 : > "$output"
 set +e
 IS_FINAL=true RELEASE_TAG='1.2.3;rm' ASSETS_DIR=$assets MANIFESTS='chikvdf,chikvdfc' \
-  GLUE_URL=https://glue.example GITHUB_OUTPUT=$output GH_CALLS=$calls \
+  GITHUB_OUTPUT=$output GH_CALLS=$calls \
   PATH="${gh_bin}:${PATH}" bash "$publish"
 status=$?
 set -e
@@ -217,7 +213,7 @@ write_tree "$assets"
 : > "$output"
 set +e
 IS_FINAL=true RELEASE_TAG=$tag ASSETS_DIR=$assets MANIFESTS='chikvdf,chikvdfc' \
-  GLUE_URL=https://glue.example GITHUB_OUTPUT=$output GH_CALLS=$calls GH_EXIT=1 \
+  GITHUB_OUTPUT=$output GH_CALLS=$calls GH_EXIT=1 \
   PATH="${gh_bin}:${PATH}" bash "$publish"
 status=$?
 set -e
@@ -226,9 +222,6 @@ if [ "$status" -eq 0 ]; then
 fi
 if grep -q '^published=true$' "$output"; then
   fail "gh failure should not record published=true"
-fi
-if grep -q 'glue_chikvdf=' "$output" || grep -q 'glue_chikvdfc=' "$output"; then
-  fail "gh failure should not record glue payloads"
 fi
 
 job_field() {
@@ -461,9 +454,31 @@ assert_macos_packaging_wiring() {
   fi
 }
 
+# Publishing must depend only on the GitHub token. The release path used to
+# require a GLUE_URL and die without it, which blocked releases whenever the
+# GLUE_API_URL secret was absent. Publishing now runs every check above with no
+# GLUE_URL in the environment at all, so that failure cannot recur silently.
+# shellcheck disable=SC2016
+assert_no_glue_wiring() {
+  local action="${root}/.github/actions/publish-github-release/action.yml"
+  local publish_sh="${root}/.github/actions/publish-github-release/publish.sh"
+  local packages_yml="${root}/.github/workflows/build-packages.yml"
+
+  if grep -Fqi 'glue' "$publish_sh"; then
+    fail "publish.sh still references glue"
+  fi
+  if grep -Fqi 'glue' "$action"; then
+    fail "publish action still declares or calls glue"
+  fi
+  if grep -Fqi 'glue' "$packages_yml"; then
+    fail "build-packages.yml still passes a glue URL"
+  fi
+}
+
 assert_publish_dependencies
 assert_windows_packaging_wiring
 assert_macos_packaging_wiring
+assert_no_glue_wiring
 
 rm -rf "$assets" "$gh_bin"
 rm -f "$calls" "$output"

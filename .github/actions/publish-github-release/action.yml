@@ -1,7 +1,7 @@
 name: Publish GitHub release
 description: >
-  Upload every manifest asset in one gh release upload --clobber, then notify
-  glue. A non-final release or an incomplete set uploads nothing.
+  Upload every manifest asset in one gh release upload --clobber. A non-final
+  release or an incomplete set uploads nothing.
 inputs:
   tag:
     description: Release tag
@@ -14,9 +14,6 @@ inputs:
     required: true
   is_final:
     description: Must be the string true. Any other value skips publishing.
-    required: true
-  glue_url:
-    description: Glue API base URL
     required: true
 outputs:
   published:
@@ -32,24 +29,5 @@ runs:
         RELEASE_TAG: ${{ inputs.tag }}
         ASSETS_DIR: ${{ inputs.assets_dir }}
         MANIFESTS: ${{ inputs.manifests }}
-        GLUE_URL: ${{ inputs.glue_url }}
         GH_TOKEN: ${{ github.token }}
       run: bash "$GITHUB_ACTION_PATH/publish.sh"
-
-    - name: Notify chikvdf glue
-      if: steps.publish.outputs.glue_chikvdf != ''
-      uses: Chik-Network/actions/github/glue@main
-      with:
-        json_data: ${{ steps.publish.outputs.glue_chikvdf }}
-        glue_url: ${{ inputs.glue_url }}
-        glue_project: chikvdf
-        glue_path: trigger
-
-    - name: Notify chikvdfc glue
-      if: steps.publish.outputs.glue_chikvdfc != ''
-      uses: Chik-Network/actions/github/glue@main
-      with:
-        json_data: ${{ steps.publish.outputs.glue_chikvdfc }}
-        glue_url: ${{ inputs.glue_url }}
-        glue_project: chikvdfc
-        glue_path: trigger

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Upload one complete GitHub release asset set, then record glue payloads.
-# A non-final release skips. A final release with a missing file, a bad
-# digest, or an unsafe tag uploads nothing.
+# Upload one complete GitHub release asset set.
+# A non-final release skips. A final release with a missing file, a bad digest,
+# or an unsafe tag uploads nothing.
 set -euo pipefail
 
 die() {
@@ -21,8 +21,8 @@ if [ "${IS_FINAL:-}" != "true" ]; then
   exit 0
 fi
 
-if [ -z "${RELEASE_TAG:-}" ] || [ -z "${ASSETS_DIR:-}" ] || [ -z "${MANIFESTS:-}" ] || [ -z "${GLUE_URL:-}" ]; then
-  die "tag, assets directory, manifests, and glue URL are required"
+if [ -z "${RELEASE_TAG:-}" ] || [ -z "${ASSETS_DIR:-}" ] || [ -z "${MANIFESTS:-}" ]; then
+  die "tag, assets directory, and manifests are required"
 fi
 if [ ! -d "$ASSETS_DIR" ]; then
   die "assets directory does not exist"
@@ -36,7 +36,6 @@ manifest_dir="${script_dir}/manifests"
 
 declare -A required=()
 required_order=()
-manifest_names=()
 
 IFS=',' read -r -a manifest_tokens <<< "$MANIFESTS"
 for token in "${manifest_tokens[@]}"; do
@@ -52,7 +51,6 @@ for token in "${manifest_tokens[@]}"; do
   if [ ! -f "$manifest_path" ]; then
     die "unknown manifest: ${name}"
   fi
-  manifest_names+=("$name")
   while IFS= read -r line || [ -n "$line" ]; do
     line=${line%%#*}
     line=${line//[[:space:]]/}
@@ -129,27 +127,7 @@ for asset in "${required_order[@]}"; do
   files+=("${matches[$asset]}")
 done
 
-glue_chikvdf=""
-glue_chikvdfc=""
-for name in "${manifest_names[@]}"; do
-  case "$name" in
-    chikvdf)
-      glue_chikvdf=$(jq -nc --arg release_version "$RELEASE_TAG" --arg windows_amd64 "chikvdf-win64.zip" \
-        '{release_version:$release_version,windows_amd64:$windows_amd64}')
-      ;;
-    chikvdfc)
-      glue_chikvdfc=$(jq -nc --arg release_version "$RELEASE_TAG" '{release_version:$release_version}')
-      ;;
-  esac
-done
-
 echo "publish-github-release: uploading ${#files[@]} assets to ${RELEASE_TAG}"
 gh release upload --clobber "$RELEASE_TAG" "${files[@]}"
 
-if [ -n "$glue_chikvdf" ]; then
-  write_output "glue_chikvdf=${glue_chikvdf}"
-fi
-if [ -n "$glue_chikvdfc" ]; then
-  write_output "glue_chikvdfc=${glue_chikvdfc}"
-fi
 write_output "published=true"

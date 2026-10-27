@@ -127,14 +127,13 @@ jobs:
           path: release-assets/c-libraries
           merge-multiple: true
 
-      - name: Upload release assets and notify glue
+      - name: Upload release assets
         uses: ./.github/actions/publish-github-release
         with:
           tag: ${{ github.event.release.tag_name }}
           assets_dir: release-assets
           manifests: chikvdf,chikvdfc
           is_final: ${{ needs.release-policy.outputs.is_final }}
-          glue_url: ${{ secrets.GLUE_API_URL }}
 
   release-publish-checks:
     name: Release publish checks
