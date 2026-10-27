@@ -10,7 +10,7 @@ script="${root}/scripts/select-macos-signing-identities.sh"
 
 fail() {
   echo "FAIL: $*" >&2
-#  exit 1
+  exit 1
 }
 
 command -v jq >/dev/null 2>&1 || fail "jq is required for the identity-selection test"

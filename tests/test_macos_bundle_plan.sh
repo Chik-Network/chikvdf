@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# Exercises the macOS release mode/artifact-name derivation without macOS tools.
+# Exercises the macOS artifact-name derivation without macOS tools.
+#
+# macOS bundles are not signed with a Developer ID and not notarized. This test
+# pins that decision, the artifact names the release manifest requires, and the
+# fact that legacy signing inputs are accepted but ignored.
 set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
 script="${root}/scripts/package-macos-bundle.sh"
+manifest="${root}/.github/actions/publish-github-release/manifests/chikvdf.txt"
 
 fail() {
   echo "FAIL: $*" >&2
-#  exit 1
+  exit 1
 }
 
 run_plan() {
@@ -23,56 +28,40 @@ assert_has() {
   printf '%s\n' "$output" | grep -Fxq "$want" || fail "$desc: missing [$want] in [$output]"
 }
 
-assert_plan_fails() {
-  local desc="$1" want="$2"
-  shift 2
-  local output status
-  set +e
-  output="$(run_plan "$@" 2>&1)"
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    fail "$desc (expected non-zero)"
-  fi
-  printf '%s\n' "$output" | grep -Fq "$want" || fail "$desc: expected [$want], got [$output]"
-  echo "ok: $desc"
+# The release manifest is written with a {tag} placeholder, so compare in that
+# form. A name that is not listed there would make publish-release refuse to
+# upload anything.
+assert_in_manifest() {
+  local name="$1" desc="$2" expected
+  expected=$(printf '%s\n' "$name" | sed 's/v1\.2\.3/{tag}/')
+  grep -Fxq "$expected" "$manifest" || fail "$desc: $expected is not in the release manifest"
 }
 
+unsigned_status="ad-hoc signed (no Developer ID; codesign -s - after install_name_tool); not notarized"
+pkg_status="unsigned (no Developer ID Installer); not notarized; not for distribution"
+
+# A normal push: ad-hoc, and the names already match the release manifest.
 output="$(run_plan)"
-assert_has "$output" "mode=adhoc" "non-release defaults to ad-hoc"
-assert_has "$output" "asset_name=chikvdf-v1.2.3-macos-arm64-unsigned.zip" "ad-hoc zip name"
-assert_has "$output" "pkg_name=chikvdf-v1.2.3-macos-arm64-unsigned.pkg" "ad-hoc pkg name"
-assert_has "$output" "bundle_status=ad-hoc signed (no Developer ID; codesign -s - after install_name_tool)" "ad-hoc bundle status"
+assert_has "$output" "mode=adhoc" "default build is ad-hoc"
+assert_has "$output" "asset_name=chikvdf-v1.2.3-macos-arm64.zip" "zip name carries no -unsigned suffix"
+assert_has "$output" "pkg_name=chikvdf-v1.2.3-macos-arm64.pkg" "pkg name carries no -unsigned suffix"
+assert_has "$output" "bundle_status=${unsigned_status}" "bundle status says ad-hoc"
+assert_has "$output" "pkg_status=${pkg_status}" "pkg status says unsigned"
+assert_in_manifest "chikvdf-v1.2.3-macos-arm64.zip" "zip name"
+assert_in_manifest "chikvdf-v1.2.3-macos-arm64.pkg" "pkg name"
+echo "ok: default build is ad-hoc and release-named"
 
-output="$(run_plan \
-  IS_RELEASE=true \
-  REQUEST_NOTARIZE=false \
-  HAS_APPLE_SECRET=true \
-  HAS_INSTALLER_SECRET=true \
-  HAS_NOTARIZE_SECRETS=true \
-  APP_SIGNING_IDENTITY=app-hash \
-  INSTALLER_SIGNING_IDENTITY=installer-name)"
-assert_has "$output" "mode=developer-id" "release without notarization stays Developer ID"
-assert_has "$output" "asset_name=chikvdf-v1.2.3-macos-arm64.zip" "Developer ID zip name"
-assert_has "$output" "pkg_name=chikvdf-v1.2.3-macos-arm64.pkg" "Developer ID pkg name"
-assert_has "$output" "bundle_status=signed (notarization not requested)" "Developer ID bundle status"
-assert_has "$output" "pkg_status=signed (Developer ID Installer; notarization not requested)" "Developer ID pkg status"
+# A final release with no Apple credentials at all must not fail. This is the
+# case that used to die with "Release/notarized builds require Apple signing
+# certificate secrets" and block the whole release.
+output="$(run_plan IS_RELEASE=true REQUEST_NOTARIZE=true)"
+assert_has "$output" "mode=adhoc" "final release without secrets stays ad-hoc"
+assert_has "$output" "asset_name=chikvdf-v1.2.3-macos-arm64.zip" "final release keeps the release zip name"
+assert_has "$output" "pkg_name=chikvdf-v1.2.3-macos-arm64.pkg" "final release keeps the release pkg name"
+echo "ok: final release no longer requires Apple credentials"
 
-output="$(run_plan \
-  IS_RELEASE=false \
-  REQUEST_NOTARIZE=true \
-  HAS_APPLE_SECRET=true \
-  HAS_INSTALLER_SECRET=true \
-  HAS_NOTARIZE_SECRETS=true \
-  APP_SIGNING_IDENTITY=app-hash \
-  INSTALLER_SIGNING_IDENTITY=installer-name \
-  APPLE_NOTARIZE_USERNAME=user \
-  APPLE_NOTARIZE_PASSWORD=pass \
-  APPLE_TEAM_ID=TEAM123)"
-assert_has "$output" "mode=notarized" "manual notarization request selects notarized mode"
-assert_has "$output" "pkg_name=chikvdf-v1.2.3-macos-arm64.pkg" "notarized pkg name"
-assert_has "$output" "pkg_status=signed + notarized + stapled (Developer ID Installer)" "notarized pkg status"
-
+# Legacy signing inputs are still accepted so older callers do not break, but
+# they must not change the mode or the artifact names.
 output="$(run_plan \
   IS_RELEASE=true \
   REQUEST_NOTARIZE=true \
@@ -84,30 +73,21 @@ output="$(run_plan \
   APPLE_NOTARIZE_USERNAME=user \
   APPLE_NOTARIZE_PASSWORD=pass \
   APPLE_TEAM_ID=TEAM123)"
-assert_has "$output" "mode=notarized" "final release with notarization selects notarized mode"
+assert_has "$output" "mode=adhoc" "legacy signing inputs are ignored"
+assert_has "$output" "bundle_status=${unsigned_status}" "legacy inputs do not claim a Developer ID signature"
+assert_has "$output" "pkg_status=${pkg_status}" "legacy inputs do not claim a signed package"
+echo "ok: legacy signing inputs are ignored"
 
-assert_plan_fails "release without app secrets" \
-  "require Apple signing certificate secrets" \
-  IS_RELEASE=true REQUEST_NOTARIZE=false HAS_APPLE_SECRET=false
-assert_plan_fails "notarization without installer secrets" \
-  "require the macOS installer identity" \
-  IS_RELEASE=false REQUEST_NOTARIZE=true HAS_APPLE_SECRET=true HAS_INSTALLER_SECRET=false HAS_NOTARIZE_SECRETS=true
-assert_plan_fails "release without notarization secrets" \
-  "require notarization secrets" \
-  IS_RELEASE=true REQUEST_NOTARIZE=false HAS_APPLE_SECRET=true HAS_INSTALLER_SECRET=true HAS_NOTARIZE_SECRETS=false \
-  APP_SIGNING_IDENTITY=app-hash INSTALLER_SIGNING_IDENTITY=installer-name
-assert_plan_fails "Developer ID build without an app hash" \
-  "APP_SIGNING_IDENTITY is required" \
-  IS_RELEASE=true REQUEST_NOTARIZE=false HAS_APPLE_SECRET=true HAS_INSTALLER_SECRET=true HAS_NOTARIZE_SECRETS=true \
-  APP_SIGNING_IDENTITY= INSTALLER_SIGNING_IDENTITY=installer-name
-assert_plan_fails "Developer ID build without an installer name" \
-  "INSTALLER_SIGNING_IDENTITY (the installer common name) is required" \
-  IS_RELEASE=true REQUEST_NOTARIZE=false HAS_APPLE_SECRET=true HAS_INSTALLER_SECRET=true HAS_NOTARIZE_SECRETS=true \
-  APP_SIGNING_IDENTITY=app-hash INSTALLER_SIGNING_IDENTITY=
-assert_plan_fails "notarization without credentials" \
-  "APPLE_NOTARIZE_USERNAME is required" \
-  IS_RELEASE=false REQUEST_NOTARIZE=true HAS_APPLE_SECRET=true HAS_INSTALLER_SECRET=true HAS_NOTARIZE_SECRETS=true \
-  APP_SIGNING_IDENTITY=app-hash INSTALLER_SIGNING_IDENTITY=installer-name \
-  APPLE_NOTARIZE_USERNAME= APPLE_NOTARIZE_PASSWORD=pass APPLE_TEAM_ID=TEAM123
+# The script must not resurrect a notarization or Developer ID path.
+if grep -Fq 'xcrun notarytool' "$script"; then
+  fail "macOS packaging still calls notarytool"
+fi
+if grep -Fq 'codesign --force --timestamp --options runtime --sign' "$script"; then
+  fail "macOS packaging still signs with a Developer ID identity"
+fi
+if grep -Fq 'spctl -a' "$script"; then
+  fail "macOS packaging still gatekeeper-assesses a notarized package"
+fi
+echo "ok: no Developer ID or notarization code path"
 
 echo "macOS bundle release plan checks passed"

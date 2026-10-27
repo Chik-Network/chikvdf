@@ -88,7 +88,7 @@ jobs:
     needs: [release-policy, package, c-libraries, release-publish-checks]
     if: >-
       needs.release-policy.result == 'success' &&
-      needs.release-policy.outputs.is_final == 'false' &&
+      needs.release-policy.outputs.is_final == 'true' &&
       needs.package.result == 'success' &&
       needs.c-libraries.result == 'success' &&
       needs.release-publish-checks.result == 'success'

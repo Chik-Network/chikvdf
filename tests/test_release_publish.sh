@@ -9,7 +9,7 @@ manifest_dir="${root}/.github/actions/publish-github-release/manifests"
 
 fail() {
   echo "FAIL: $*" >&2
-#  exit 1
+  exit 1
 }
 
 run_policy() {
@@ -318,133 +318,152 @@ assert_publish_dependencies() {
   fi
 }
 
+# The Windows bundle is intentionally unsigned. These assertions pin that
+# decision so signing credentials cannot creep back in unnoticed, and so the
+# packaging contract (artifact handoff, MSVC setup, script surface) stays
+# intact. Rename win_job if the packaging job is ever renamed again.
 # shellcheck disable=SC2016
-assert_windows_signing_wiring() {
+assert_windows_packaging_wiring() {
   client="${root}/.github/workflows/build-client.yml"
   packages="${root}/.github/workflows/build-packages.yml"
   script="${root}/scripts/package-windows-bundle.ps1"
+  win_job=package-windows
   build_block="$(job_block "$client" build)"
-  sign_block="$(job_block "$client" sign-windows)"
+  win_block="$(job_block "$client" "$win_job")"
   publish_block="$(job_block "$packages" publish-release)"
 
-  if [ "$(job_field "$client" sign-windows environment)" != "windows-code-signing" ]; then
-    fail "Windows signing job does not use the windows-code-signing environment"
+  if [ -z "$win_block" ]; then
+    fail "Windows packaging job ${win_job} is missing"
   fi
-  if [ "$(job_field "$client" sign-windows needs)" != "[build]" ]; then
-    fail "Windows signing job does not need the build job"
+  if [ "$(job_field "$client" "$win_job" needs)" != "[build]" ]; then
+    fail "Windows packaging job does not need the build job"
   fi
-  if [ "$(job_field "$client" sign-windows if)" != "contains(inputs.configs, 'optimized=1') && github.event_name != 'pull_request'" ]; then
-    fail "Windows signing job is not tied to optimized non-PR Windows builds"
+  if [ "$(job_field "$client" "$win_job" if)" != "contains(inputs.configs, 'optimized=1')" ]; then
+    fail "Windows packaging job is not tied to optimized builds on every event"
   fi
-  if [ "$(job_field "$client" sign-windows runs-on)" != "windows-latest" ]; then
-    fail "Windows signing job does not run on windows-latest"
+  if [ "$(job_field "$client" "$win_job" runs-on)" != "windows-latest" ]; then
+    fail "Windows packaging job does not run on windows-latest"
   fi
-  if [ "$(job_field "$client" sign-windows timeout-minutes)" != "30" ]; then
-    fail "Windows signing job does not have a bounded timeout"
+  if [ "$(job_field "$client" "$win_job" timeout-minutes)" != "30" ]; then
+    fail "Windows packaging job does not have a bounded timeout"
   fi
-  if [ "$(job_field "$client" sign-windows contents)" != "read" ]; then
-    fail "Windows signing job does not limit contents permission to read"
-  fi
-  if [ "$(job_field "$client" sign-windows id-token)" != "write" ]; then
-    fail "Windows signing job does not request id-token: write"
-  fi
-  if [ "$(job_field "$packages" package id-token)" != "write" ]; then
-    fail "package caller does not grant id-token: write to the signing workflow"
-  fi
-  # build-client.yml contains the sign-windows job, so every caller must allow
-  # id-token even when the optimized Windows matrix is absent.
-  if [ "$(job_field "$packages" sanitize id-token)" != "write" ]; then
-    fail "sanitize caller must grant id-token: write for the nested signing job"
+  if [ "$(job_field "$client" "$win_job" contents)" != "read" ]; then
+    fail "Windows packaging job does not limit contents permission to read"
   fi
 
+  # Nothing that can sign may reach the packaging job.
+  if [ -n "$(job_field "$client" "$win_job" environment)" ]; then
+    fail "Windows packaging job still enters a signing environment"
+  fi
+  if [ -n "$(job_field "$client" "$win_job" id-token)" ]; then
+    fail "Windows packaging job still requests id-token"
+  fi
+  if grep -Fq 'AZURE_SIGNING' "$client" "$packages"; then
+    fail "workflows still reference Azure signing secrets"
+  fi
+  if grep -Fq 'sign/azure-windows' "$client"; then
+    fail "client workflow still calls the Azure Windows signing action"
+  fi
+  if grep -Eq 'EXPECTED_SIGNER_SUBJECT|EXPECTED_SIGNER_THUMBPRINT|EXPECTED_VENDOR_SUBJECT' "$client"; then
+    fail "client workflow pins expected signer identities without signing"
+  fi
+  if grep -Eq 'SM_(API_KEY|CLIENT_CERT_FILE_B64|CODE_SIGNING_CERT_SHA1_HASH|CERTKEY_ALIAS)' "$client"; then
+    fail "client workflow still references DigiCert SM_* secrets"
+  fi
+  # A step hidden behind a constant false condition is not a removal. It fails
+  # open the moment someone edits the constant.
+  if printf '%s\n' "$win_block" | grep -Eq '^[[:space:]]+if: 1 == 2$'; then
+    fail "Windows packaging job hides a signing step behind a constant false if"
+  fi
+
+  # The unsigned path must say so, not rely on the variable being absent.
+  if ! printf '%s\n' "$win_block" | grep -Fq "REQUIRE_SIGNATURES: 'false'"; then
+    fail "Windows packaging does not declare that signatures are not verified"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq 'IS_RELEASE: ${{ inputs.is_final }}'; then
+    fail "Windows packaging does not read inputs.is_final"
+  fi
+  if printf '%s\n' "$win_block" | grep -Eq 'REQUIRE_SIGNATURES:|IS_RELEASE:' | grep -q 'github.event_name'; then
+    fail "IS_RELEASE still keys off github.event_name"
+  fi
+
+  # Artifact handoff between the build matrix and the packaging job.
   if ! printf '%s\n' "$build_block" | grep -Fq 'name: windows-amd64-binaries'; then
     fail "build job does not upload windows-amd64-binaries"
   fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'name: windows-amd64-binaries'; then
-    fail "sign job does not download windows-amd64-binaries"
+  if ! printf '%s\n' "$win_block" | grep -Fq 'name: windows-amd64-binaries'; then
+    fail "packaging job does not download windows-amd64-binaries"
   fi
   if printf '%s\n' "$build_block" | grep -Fq 'name: windows-amd64-bundle'; then
-    fail "build job still uploads an unsigned windows-amd64-bundle"
+    fail "build job uploads the Windows bundle itself"
   fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'name: windows-amd64-bundle'; then
-    fail "sign job does not upload the signed windows-amd64-bundle"
-  fi
-  if grep -Fq "REQUIRE_SIGNATURES: 'false'" "$client"; then
-    fail "unsigned Windows packaging path still exists"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq "REQUIRE_SIGNATURES: 'true'"; then
-    fail "signed Windows packaging does not require signature verification"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'IS_RELEASE: ${{ inputs.is_final }}'; then
-    fail "signed Windows packaging does not read inputs.is_final"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'Chik-Network/actions/sign/azure-windows@main'; then
-    fail "Windows signing does not use the shared Azure Windows Code Sign action"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'file: ${{ steps.sign_files.outputs.files }}'; then
-    fail "Windows signing action does not receive the selected file list"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq -- '-Action ListSignFiles'; then
-    fail "Windows signing does not list files with ListSignFiles"
-  fi
-  if ! printf '%s\n' "$build_block" | grep -Fq 'step-security/msvc-dev-cmd@v1.13.1'; then
-    fail "Windows build job does not set up the MSVC environment"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'step-security/msvc-dev-cmd@v1.13.1'; then
-    fail "Windows signing job does not set up the MSVC environment"
-  fi
-  if grep -Fq 'ilammy/msvc-dev-cmd' "$client"; then
-    fail "Windows workflow still uses ilammy/msvc-dev-cmd"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'EXPECTED_SIGNER_SUBJECT' ||
-    ! printf '%s\n' "$sign_block" | grep -Fq 'EXPECTED_SIGNER_THUMBPRINT' ||
-    ! printf '%s\n' "$sign_block" | grep -Fq 'EXPECTED_VENDOR_SUBJECT'; then
-    fail "Windows signing job does not pass expected signer variables"
-  fi
-  if printf '%s\n' "$build_block" | grep -Fq 'AZURE_SIGNING'; then
-    fail "Azure signing secrets are referenced outside the sign-windows job"
-  fi
-  if ! printf '%s\n' "$sign_block" | grep -Fq 'AZURE_SIGNING_CLIENT_ID' ||
-    ! printf '%s\n' "$sign_block" | grep -Fq 'AZURE_SIGNING_TENANT_ID'; then
-    fail "Windows signing job does not read the Azure signing secrets"
+  if ! printf '%s\n' "$win_block" | grep -Fq 'name: windows-amd64-bundle'; then
+    fail "packaging job does not upload windows-amd64-bundle"
   fi
   if ! printf '%s\n' "$publish_block" | grep -Fq 'pattern: windows-amd64-bundle'; then
     fail "publish-release does not download windows-amd64-bundle"
   fi
 
-  if ! grep -Fq "ValidateSet('Assemble', 'ListSignFiles', 'Package')" "$script"; then
-    fail "Windows script does not expose the ListSignFiles action"
+  if ! printf '%s\n' "$win_block" | grep -Fq 'step-security/msvc-dev-cmd@v1.13.1'; then
+    fail "Windows packaging job does not set up the MSVC environment"
   fi
+  if grep -Fq 'ilammy/msvc-dev-cmd' "$client"; then
+    fail "Windows workflow still uses ilammy/msvc-dev-cmd"
+  fi
+
+  # The script keeps its verification surface. REQUIRE_SIGNATURES='false'
+  # bypasses only the Authenticode assertions, never the import closure.
   if ! grep -Fq "Require-Flag 'REQUIRE_SIGNATURES'" "$script"; then
     fail "Windows script does not require REQUIRE_SIGNATURES for Package"
   fi
+  if ! grep -Fq 'Assert-ImportClosure' "$script"; then
+    fail "Windows script does not verify the DLL import closure"
+  fi
   if ! grep -Fq 'Get-AuthenticodeSignature' "$script"; then
-    fail "Windows script does not verify publisher signatures"
-  fi
-  if ! grep -Fq 'TimeStamperCertificate' "$script"; then
-    fail "Windows script does not require a signature timestamp"
-  fi
-  if ! grep -Fq 'EXPECTED_SIGNER_SUBJECT' "$script" ||
-    ! grep -Fq 'EXPECTED_SIGNER_THUMBPRINT' "$script" ||
-    ! grep -Fq 'EXPECTED_VENDOR_SUBJECT' "$script"; then
-    fail "Windows script does not support expected signer variables"
+    fail "Windows script lost its publisher signature verification"
   fi
   if grep -Fq 'REQUEST_WINDOWS_SIGNING' "$script" || grep -Fq 'HAS_WINDOWS_SIGNING_SECRET' "$script"; then
     fail "Windows script still references the old DigiCert signing flags"
   fi
-  if grep -Fq "ValidateSet('Assemble', 'Sign', 'Package')" "$script"; then
-    fail "Windows script still exposes the removed local Sign action"
+}
+
+# macOS bundles are neither Developer ID signed nor notarized. The packaging
+# script owns the decision; this pins the workflow side so the certificate
+# imports and the Apple secrets cannot come back unnoticed.
+# shellcheck disable=SC2016
+assert_macos_packaging_wiring() {
+  client="${root}/.github/workflows/build-client.yml"
+  script="${root}/scripts/package-macos-bundle.sh"
+
+  if grep -Fq 'import-codesign-certs' "$client"; then
+    fail "client workflow still imports Apple signing certificates"
   fi
-  if grep -E 'REQUIRE_SIGNATURES:|IS_RELEASE:' "$client" | grep -q 'github.event_name'; then
-    fail "signing or IS_RELEASE still keys off github.event_name"
+  if grep -Eq 'APPLE_DEV_ID_APP|APPLE_DEV_ID_INSTALLER|APPLE_NOTARIZE_(USERNAME|PASSWORD)|APPLE_TEAM_ID' "$client"; then
+    fail "client workflow still reads Apple signing secrets"
   fi
-  if grep -Eq 'SM_(API_KEY|CLIENT_CERT_FILE_B64|CODE_SIGNING_CERT_SHA1_HASH|CERTKEY_ALIAS)' "$client"; then
-    fail "client workflow still references DigiCert SM_* secrets"
+  if grep -Fq 'scripts/select-macos-signing-identities.sh' "$client"; then
+    fail "client workflow still selects Apple signing identities"
+  fi
+  if grep -Eq 'HAS_APPLE_SECRET|HAS_INSTALLER_SECRET|HAS_NOTARIZE_SECRETS' "$client"; then
+    fail "client workflow still gates macOS packaging on Apple secret presence"
+  fi
+
+  if grep -Fq 'xcrun notarytool' "$script"; then
+    fail "macOS packaging still calls notarytool"
+  fi
+  if ! grep -Fxq 'mode=adhoc' "$script"; then
+    fail "macOS packaging does not pin a single ad-hoc mode"
+  fi
+  # A release used to die here when the Apple secrets were absent, which blocked
+  # publish-release. That gate must not return.
+  if grep -Fq 'Release/notarized builds require' "$script"; then
+    fail "macOS packaging still refuses a release build without Apple secrets"
   fi
 }
 
 assert_publish_dependencies
-assert_windows_signing_wiring
+assert_windows_packaging_wiring
+assert_macos_packaging_wiring
 
 rm -rf "$assets" "$gh_bin"
 rm -f "$calls" "$output"

@@ -11,7 +11,7 @@ macos_notarize_json=${MACOS_NOTARIZE_JSON:-null}
 
 is_final=false
 if [ "$event_name" = "release" ] && [ "$event_action" = "published" ] && [ "$prerelease_json" = "false" ]; then
-  is_final=false
+  is_final=true
 fi
 
 json_true() {

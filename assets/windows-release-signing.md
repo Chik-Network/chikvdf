@@ -1,5 +1,16 @@
 # Windows release signing (Azure Artifact Signing)
 
+> **Status: disabled.** Windows release binaries are currently **not** signed.
+> The `package-windows` job packs the bundle with `REQUIRE_SIGNATURES: 'false'`,
+> does not enter the `windows-code-signing` environment, and does not request an
+> OIDC token. `tests/test_release_publish.sh` enforces that state: it fails if
+> `AZURE_SIGNING`, `sign/azure-windows`, `EXPECTED_SIGNER_*`, or an
+> `environment`/`id-token` reappear in the workflow. The rest of this document
+> describes how signing was wired and is kept as a reference for re-enabling it.
+>
+> Consequence for end users: Windows SmartScreen will warn about an unknown
+> publisher until a certificate is reintroduced.
+
 Windows release binaries are signed with Azure Artifact Signing (formerly Trusted
 Signing). Signing keys stay in Azure. GitHub Actions authenticates with OIDC
 federated credentials, so there is no PKCS#12 client certificate, API key, or

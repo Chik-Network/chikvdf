@@ -16,16 +16,10 @@ on:
         required: true
         type: string
       notarize_macos:
-        description: release-policy output notarize_macos
+        description: release-policy output notarize_macos (accepted for caller
+          compatibility; macOS bundles are unsigned, so it has no effect)
         required: true
         type: string
-    secrets:
-      AZURE_SIGNING_CLIENT_ID:
-        description: Azure Artifact Signing Entra application client ID
-        required: false
-      AZURE_SIGNING_TENANT_ID:
-        description: Azure Artifact Signing Entra tenant ID
-        required: false
 
 env:
   CHIKVDF_LOG_AVX: "1"
@@ -77,80 +71,11 @@ jobs:
           bash tests/test_macos_bundle_plan.sh
           bash tests/test_macos_select_signing_identities.sh
 
-      - name: Test for Apple signing secrets
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1'
-        id: check_secrets
-        shell: bash
-        run: |
-          unset HAS_APPLE_SECRET
-          unset HAS_NOTARIZE_SECRETS
-          unset HAS_INSTALLER_SECRET
-          if [ -n "$APPLE_SECRET" ]; then HAS_APPLE_SECRET='true'; fi
-          if [ -n "$APPLE_NOTARIZE_USERNAME" ] && [ -n "$APPLE_NOTARIZE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
-            HAS_NOTARIZE_SECRETS='true'
-          fi
-          if [ -n "$APPLE_INSTALLER_SECRET" ] && [ -n "$APPLE_INSTALLER_SECRET_PASS" ]; then
-            HAS_INSTALLER_SECRET='true'
-          fi
-          echo "HAS_APPLE_SECRET=${HAS_APPLE_SECRET}" >> "$GITHUB_OUTPUT"
-          echo "HAS_NOTARIZE_SECRETS=${HAS_NOTARIZE_SECRETS}" >> "$GITHUB_OUTPUT"
-          echo "HAS_INSTALLER_SECRET=${HAS_INSTALLER_SECRET}" >> "$GITHUB_OUTPUT"
-        env:
-          APPLE_SECRET: "${{ secrets.APPLE_DEV_ID_APP }}"
-          APPLE_NOTARIZE_USERNAME: "${{ secrets.APPLE_NOTARIZE_USERNAME }}"
-          APPLE_NOTARIZE_PASSWORD: "${{ secrets.APPLE_NOTARIZE_PASSWORD }}"
-          APPLE_TEAM_ID: "${{ secrets.APPLE_TEAM_ID }}"
-          APPLE_INSTALLER_SECRET: "${{ secrets.APPLE_DEV_ID_INSTALLER }}"
-          APPLE_INSTALLER_SECRET_PASS: "${{ secrets.APPLE_DEV_ID_INSTALLER_PASS }}"
-
-      - name: Determine macOS signing request
-        id: macos_signing
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1'
-        shell: bash
-        env:
-          IS_RELEASE: ${{ inputs.is_final }}
-          REQUEST_NOTARIZE: ${{ inputs.notarize_macos }}
-        run: |
-          if [ "$IS_RELEASE" = "true" ] || [ "$REQUEST_NOTARIZE" = "true" ]; then
-            echo "requested=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "requested=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Delete keychain if it already exists
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1' && steps.macos_signing.outputs.requested == 'true' && steps.check_secrets.outputs.HAS_APPLE_SECRET == 'true'
-        run: security delete-keychain signing_temp.keychain || true
-
-      - name: Import Apple app signing certificate
-        id: import_app_cert
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1' && steps.macos_signing.outputs.requested == 'true' && steps.check_secrets.outputs.HAS_APPLE_SECRET == 'true'
-        uses: Apple-Actions/import-codesign-certs@v7.1.0
-        with:
-          p12-file-base64: ${{ secrets.APPLE_DEV_ID_APP }}
-          p12-password: ${{ secrets.APPLE_DEV_ID_APP_PASS }}
-
-      # The .pkg needs a second, separate identity. Developer ID Application
-      # cannot sign an installer package.
-      - name: Import Apple installer signing certificate
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1' && steps.macos_signing.outputs.requested == 'true' && steps.check_secrets.outputs.HAS_APPLE_SECRET == 'true' && steps.check_secrets.outputs.HAS_INSTALLER_SECRET == 'true'
-        uses: Apple-Actions/import-codesign-certs@v7.1.0
-        with:
-          keychain: signing_temp
-          create-keychain: false
-          keychain-password: ${{ steps.import_app_cert.outputs.keychain-password }}
-          p12-file-base64: ${{ secrets.APPLE_DEV_ID_INSTALLER }}
-          p12-password: ${{ secrets.APPLE_DEV_ID_INSTALLER_PASS }}
-
-      - name: Select Apple signing identities
-        id: signing_identities
-        if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1' && steps.macos_signing.outputs.requested == 'true' && steps.check_secrets.outputs.HAS_APPLE_SECRET == 'true' && steps.check_secrets.outputs.HAS_INSTALLER_SECRET == 'true'
-        shell: bash
-        env:
-          APP_IDENTITIES: ${{ steps.import_app_cert.outputs.identities }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          KEYCHAIN_NAME: signing_temp
-        run: scripts/select-macos-signing-identities.sh
-
+      # macOS bundles are not signed with a Developer ID and are not notarized.
+      # No Apple certificate is imported here and no Apple secret is read, so the
+      # packaging step cannot fail on missing credentials. The staged binaries are
+      # still re-signed ad-hoc inside scripts/package-macos-bundle.sh, which arm64
+      # requires after install_name_tool rewrites the Mach-O files.
       - name: Install macOS deps (build + runtime)
         if: startsWith(matrix.os, 'macos')
         run: |
@@ -473,15 +398,6 @@ jobs:
           MACOS_ARCH: ${{ matrix.os == 'macos-15' && 'arm64' || 'intel' }}
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || format('0.0.1-{0}', github.run_id) }}
           IS_RELEASE: ${{ inputs.is_final }}
-          REQUEST_NOTARIZE: ${{ inputs.notarize_macos }}
-          HAS_APPLE_SECRET: ${{ steps.check_secrets.outputs.HAS_APPLE_SECRET || '' }}
-          HAS_NOTARIZE_SECRETS: ${{ steps.check_secrets.outputs.HAS_NOTARIZE_SECRETS || '' }}
-          HAS_INSTALLER_SECRET: ${{ steps.check_secrets.outputs.HAS_INSTALLER_SECRET || '' }}
-          APP_SIGNING_IDENTITY: ${{ steps.signing_identities.outputs.app_identity_hash || '' }}
-          INSTALLER_SIGNING_IDENTITY: ${{ steps.signing_identities.outputs.installer_identity_name || '' }}
-          APPLE_NOTARIZE_USERNAME: "${{ secrets.APPLE_NOTARIZE_USERNAME }}"
-          APPLE_NOTARIZE_PASSWORD: "${{ secrets.APPLE_NOTARIZE_PASSWORD }}"
-          APPLE_TEAM_ID: "${{ secrets.APPLE_TEAM_ID }}"
         run: scripts/package-macos-bundle.sh
 
       - name: Verify shipped macOS zip launches without Homebrew
@@ -544,7 +460,7 @@ jobs:
             src/hw_vdf_client
             src/hw/libft4222/*.dylib
 
-      # sign-windows downloads this into the workspace root and expects the
+      # package-windows downloads this into the workspace root and expects the
       # build/, src/hw/libft4222/, and mpir_gc_x64/ paths to be preserved.
       - name: Upload binaries artifact (Windows)
         if: matrix.os == 'windows-latest' && matrix.config == 'optimized=1'
@@ -596,23 +512,20 @@ jobs:
           name: installer-${{ matrix.os }}
           path: dist/*.deb
 
-  # Every optimized Windows build outside a pull request is signed. The job
-  # enters the windows-code-signing environment, so the Azure credentials are
-  # scoped here and the OIDC subject includes the environment. The environment
-  # secrets are assumed to exist; the shared signing action fails if they are
-  # missing. PR builds compile/test Windows without entering the environment.
-  sign-windows:
-    name: Sign Windows bundle
+  # Windows bundles are assembled and packaged here, after the matrix has
+  # produced the raw binaries. This job is deliberately unsigned: no signing
+  # environment, no OIDC token, no signing credentials, so it also runs for
+  # pull requests. REQUIRE_SIGNATURES below disables only the Authenticode
+  # assertions; Package still enforces the DLL import closure and launches
+  # every shipped exe from a clean directory.
+  package-windows:
+    name: Package Windows bundle
     needs: [build]
-    if: contains(inputs.configs, 'optimized=1') && github.event_name != 'pull_request'
+    if: contains(inputs.configs, 'optimized=1')
     runs-on: windows-latest
     timeout-minutes: 30
-    # Federated credential subject:
-    # repo:Chik-Network/chikvdf:environment:windows-code-signing
-    environment: windows-code-signing
     permissions:
       contents: read
-      id-token: write
     env:
       INSTALLER_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || format('0.0.1-{0}', github.run_id) }}
     steps:
@@ -653,38 +566,14 @@ jobs:
         shell: pwsh
         run: ./scripts/package-windows-bundle.ps1 -Action Assemble
 
-      - name: List Windows files to sign
-        id: sign_files
-        shell: pwsh
-        run: |
-          $files = @(./scripts/package-windows-bundle.ps1 -Action ListSignFiles)
-          if ($files.Count -eq 0) {
-            throw "No Windows files were selected for signing"
-          }
-          foreach ($file in $files) {
-            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
-              throw "Selected signing file is missing: $file"
-            }
-          }
-          "files<<EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
-          $files | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
-          "EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8NoBOM
-
-#      - name: Sign Windows chikvdf executables and MPIR DLLs
-#        uses: Chik-Network/actions/sign/azure-windows@main
-#        with:
-#          azure_tenant_id: ${{ secrets.AZURE_SIGNING_TENANT_ID }}
-#          azure_client_id: ${{ secrets.AZURE_SIGNING_CLIENT_ID }}
-#          file: ${{ steps.sign_files.outputs.files }}
-
       - name: Package and verify Windows zip bundle
         shell: pwsh
         env:
           IS_RELEASE: ${{ inputs.is_final }}
+          # This bundle is not Authenticode-signed. Package still enforces the
+          # DLL import closure and launches every shipped exe from a clean
+          # directory; only the signature assertions are switched off here.
           REQUIRE_SIGNATURES: 'false'
-          EXPECTED_SIGNER_SUBJECT: ${{ vars.WINDOWS_SIGNING_SIGNER_SUBJECT }}
-          EXPECTED_SIGNER_THUMBPRINT: ${{ vars.WINDOWS_SIGNING_SIGNER_THUMBPRINT }}
-          EXPECTED_VENDOR_SUBJECT: ${{ vars.WINDOWS_SIGNING_VENDOR_SUBJECT }}
         run: ./scripts/package-windows-bundle.ps1 -Action Package
 
       - name: Upload Windows bundle artifact

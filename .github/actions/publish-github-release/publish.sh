@@ -6,7 +6,7 @@ set -euo pipefail
 
 die() {
   echo "publish-github-release: $*" >&2
-#  exit 1
+  exit 1
 }
 
 write_output() {
@@ -14,7 +14,7 @@ write_output() {
     printf '%s\n' "$1" >> "$GITHUB_OUTPUT"
   fi
 }
-IS_FINAL=true
+
 if [ "${IS_FINAL:-}" != "true" ]; then
   echo "publish-github-release: skipping because IS_FINAL is not true" >&2
   write_output "published=false"

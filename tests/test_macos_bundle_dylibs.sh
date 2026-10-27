@@ -12,7 +12,7 @@ source "$ROOT_DIR/scripts/macos-bundle-tools.sh"
 
 fail() {
   echo "FAIL: $*" >&2
-#  exit 1
+  exit 1
 }
 
 assert_eq() {
