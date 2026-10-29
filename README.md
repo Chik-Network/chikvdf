@@ -24,6 +24,66 @@ Windows (x64), and produces:
 CI builds the CPU and ASIC binaries on all of those platforms. The ASIC
 emulator tests run without a board.
 
+## Install a published build
+
+Release binaries are available through Homebrew, winget, and apt. These
+channels install the same binaries as the GitHub release archives.
+
+### macOS
+
+Install through the [Chik Homebrew tap](https://github.com/Chik-Network/homebrew-chik):
+
+```bash
+brew install chik-network/chik/chikvdf
+```
+
+This installs `vdf_client`, `vdf_bench`, `hw_vdf_client`, `hw_test`, and the
+emulators. The bundled FTDI libraries are installed under `libexec/chikvdf`.
+Install the FTDI D2XX driver before using the ASIC tools with a board; see
+[README_ASIC.md](README_ASIC.md).
+
+### Windows
+
+Install through winget:
+
+```powershell
+winget install --id Chik.chikvdf --exact
+```
+
+The winget package is a machine-scope Inno Setup installer. It installs all
+six tools (`vdf_client`, `vdf_bench`, `hw_vdf_client`, `hw_test`,
+`emu_hw_vdf_client`, and `emu_hw_test`) under
+`%ProgramFiles%\Chik\chikvdf\bin`, adds that directory to the system `PATH`,
+and stages the FTDI CDM driver (`ftdibus.inf` and `ftdiport.inf`) with
+`pnputil`. One install therefore covers software timelords and ASIC hosts.
+The installer requires x64 Windows 10 version 2004 or newer and will show a
+UAC prompt. If you cannot elevate, use the portable
+`chikvdf-<version>-windows-amd64.zip` from a
+[release](https://github.com/Chik-Network/chikvdf/releases) instead. The
+shared FTDI driver is left installed when chikvdf is uninstalled. Open a new
+terminal after installation so the updated `PATH` is visible. See
+[README_ASIC.md](README_ASIC.md) and `assets/windows-installer.md`.
+
+### Linux
+
+Add the Chik apt repository and install `chikvdf`:
+
+```bash
+sudo apt-get update
+sudo apt-get install ca-certificates curl gnupg
+curl -sL https://repo.chik.net/FD39E6D3.pubkey.asc | sudo gpg --dearmor -o /usr/share/keyrings/chik.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/chik.gpg] https://repo.chik.net/chikvdf/debian/ stable main" | sudo tee /etc/apt/sources.list.d/chikvdf.list
+sudo apt-get update
+sudo apt-get install chikvdf
+```
+
+The package installs `vdf_client`, `vdf_bench`, `hw_vdf_client`, `hw_test`,
+and the emulators under `/usr/bin`, plus `libft4222.so` and the udev rule for
+the ASIC board.
+
+The Python bindings are installed separately with `pip install chikvdf`; see
+[Building the Python wheel](#building-the-python-wheel).
+
 ## Run a timelord
 
 A timelord needs a synced Chik full node and one or more VDF clients connected

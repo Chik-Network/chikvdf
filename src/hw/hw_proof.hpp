@@ -5,6 +5,7 @@
 #include "hw_interface.hpp"
 #include "hw_util.hpp"
 #include "bqfc.h"
+#include "pair_kernels_config.h"
 
 #include <atomic>
 #include <array>
@@ -24,6 +25,7 @@
 #define HW_VDF_MAX_CHKP_SEGMENTS (64 - 3)
 #define HW_VDF_MAX_AUX_THREADS 64
 #define HW_VDF_DEFAULT_MAX_AUX_THREADS 4
+#define HW_VDF_DEFAULT_SEGMENT_THREADS 2
 #define HW_VDF_WQ_WARN_MULT 2
 #define HW_VDF_B_SIZE 33
 
@@ -42,6 +44,10 @@ struct vdf_work {
     struct vdf_value start_val;
     uint64_t start_iters;
     uint32_t n_steps;
+    // A second fill run in lockstep on the same aux thread (paired kernels).
+    // Set only when a fill is taken from the queue; queued fills have none.
+    // Owners clear start_val before deletion (hw_proof_free_work).
+    std::unique_ptr<struct vdf_work> pair;
 };
 
 struct vdf_proof_req {
@@ -70,8 +76,11 @@ struct vdf_proof_delivery {
 struct vdf_proof_opts {
     uint8_t max_aux_threads;
     uint8_t max_proof_threads;
+    uint8_t segment_threads = HW_VDF_DEFAULT_SEGMENT_THREADS;
     uint32_t checkpoint_threshold = HW_VDF_CHKP_INTERVAL;
     bool retain_asic_values = false;
+    // Square independent fills and bucket products in pairs (pair_kernels.h).
+    bool pair_kernels = CHIKVDF_PAIR_KERNELS_DEFAULT;
 };
 
 struct hw_aux_job {
@@ -137,10 +146,12 @@ struct vdf_state {
     uint8_t idx;
     uint8_t max_aux_threads;
     uint8_t max_proof_threads;
+    uint8_t segment_threads = HW_VDF_DEFAULT_SEGMENT_THREADS;
     bool completed;
     std::atomic<bool> stopping;
     bool init_done = false;
     bool retain_asic_values = false;
+    bool pair_kernels = false;
     std::mutex retained_values_mtx;
     std::deque<vdf_retained_value> retained_values;
     uint64_t retained_generation = 0;

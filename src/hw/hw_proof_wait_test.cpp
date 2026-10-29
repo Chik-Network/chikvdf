@@ -1,4 +1,5 @@
 #include "hw_proof.hpp"
+#include "hw_proof_internal.hpp"
 #include "chik_driver.hpp"
 #include "pll_freqs.hpp"
 #include <chrono>
@@ -9,9 +10,7 @@
 #include <stdexcept>
 #include <vector>
 
-int hw_proof_wait_value(struct vdf_state *vdf, size_t pos);
-form *hw_proof_value_at(struct vdf_state *vdf, size_t pos);
-void hw_proof_process_work(struct vdf_state *vdf);
+#include "hw_client_loop_test.cpp"
 
 static bool wait_for(const std::function<bool()> &ready, std::chrono::milliseconds limit)
 {
@@ -66,6 +65,65 @@ static void check_pll_bounds() {
             "Frequency moved past the PLL table");
 }
 
+// The emulator deliberately does not model the regulator and returns 0.24375 V.
+// Legacy clock steps must neither validate that sample nor derive a voltage write
+// from it; the supervised transaction would reject it.
+static void check_legacy_frequency_adjustment() {
+    ChikDriver driver;
+    require(driver.ftdi.Open() == 0, "Legacy fixture could not open the emulator");
+    const auto start = timelord_control::frequency_index(1100., pll_entries, VALID_PLL_FREQS);
+    require(driver.SetPLLFrequencyByIndex(start), "Legacy fixture could not set its PLL");
+    require(driver.GetBoardVoltage() < timelord_control::Limits::min_voltage,
+            "Legacy fixture no longer exercises an invalid voltage readback");
+    adjust_hw_freq(&driver, 0, 1);
+    require(driver.freq_idx == start + 1, "Legacy clock step depended on voltage validation");
+    adjust_hw_freq(&driver, 0, -1);
+    require(driver.freq_idx == start, "Legacy clock step down did not restore the index");
+    require(driver.SetPLLFrequencyByIndex(VALID_PLL_FREQS - 2), "Could not select a high PLL entry");
+    adjust_hw_freq(&driver, 0, 1);
+    require(driver.freq_idx == VALID_PLL_FREQS - 1,
+            "Legacy auto-frequency lost its full PLL-table range");
+    driver.freq_idx = VALID_PLL_FREQS;
+    adjust_hw_freq(&driver, 0, 1); // Invalid indexes are logged, not thrown.
+    require(driver.freq_idx == VALID_PLL_FREQS, "Invalid legacy PLL index was changed");
+}
+
+static void check_initial_values() {
+    for (uint8_t first : {uint8_t(4), uint8_t(8)}) {
+        for (size_t index = 0; index < BQFC_FORM_SIZE; ++index) {
+            vdf_state vdf{};
+            std::vector<uint8_t> bytes(BQFC_FORM_SIZE, 0);
+            bytes[0] = first;
+            if (index == 0) bytes[0] |= 1;
+            else bytes[index] = 1;
+            bool rejected = false;
+            try {
+                init_vdf_state(&vdf, nullptr, "-23", bytes.data(), 4000, 0);
+            } catch (const std::exception &) {
+                rejected = true;
+            }
+            if (!rejected) {
+                hw_stop_proof(&vdf);
+                clear_vdf_state(&vdf);
+            }
+            require(rejected, "Unexpected initial value");
+            require(!vdf.init_done && vdf.value_blocks == nullptr && vdf.valid_values == nullptr,
+                    "Unexpected initial state");
+            for (const auto &worker : vdf.aux_threads)
+                require(!worker.joinable(), "Unexpected worker state");
+        }
+    }
+    for (const char *discriminant : {"invalid", "-27"}) {
+        vdf_state vdf{};
+        uint8_t bytes[BQFC_FORM_SIZE] = {8};
+        bool rejected = false;
+        try { init_vdf_state(&vdf, nullptr, discriminant, bytes, 4000, 0); }
+        catch (const std::exception &) { rejected = true; }
+        if (!rejected) { hw_stop_proof(&vdf); clear_vdf_state(&vdf); }
+        require(rejected && !vdf.init_done, "Unexpected initial value");
+    }
+}
+
 static void check_delivery(const vdf_proof_delivery &delivery) {
     const auto tag = static_cast<uint8_t>(delivery.final.iters % 251);
     require(delivery.checkpoints.size() == 1, "Checkpoint snapshot was incomplete");
@@ -83,6 +141,9 @@ struct OwnedVdf {
         clear_vdf_state(vdf);
     }
 };
+
+#include "hw_proof_fill_test.cpp"
+#include "hw_proof_segment_threads_test.cpp"
 
 static uint64_t read_be64(const uint8_t *bytes) {
     uint64_t value = 0;
@@ -141,6 +202,125 @@ static void mark_chain_done(vdf_state &vdf, uint16_t idx) {
     }
 }
 
+static void check_completed_checkpoint_reuse() {
+    {
+        vdf_state vdf{};
+        vdf.interval = HW_VDF_VALUE_INTERVAL;
+        vdf.checkpoint_threshold = 8000;
+        uint16_t root = hw_queue_proof(&vdf, 8000, HW_VDF_PROOF_NONE, 0);
+        uint16_t tip = hw_queue_proof(&vdf, 8000, root, 0);
+        mark_chain_done(vdf, tip);
+        vdf.queued_proofs.clear(); // Both checkpoints have left the dispatch queue.
+        hw_request_proof(&vdf, 18000, false);
+        hw_proof_process_req(&vdf);
+        require(vdf.proofs.size() == 3 && vdf.proofs.back().prev == tip
+                && vdf.proofs.back().seg_iters == 2000,
+                "Completed checkpoint prefix was reconstructed");
+        require(vdf.proofs[root].ref_cnt == 2 && vdf.proofs[tip].ref_cnt == 2,
+                "Reused checkpoint chain did not retain its references");
+        hw_request_proof(&vdf, 12000, false); // Earlier than the completed tip.
+        hw_proof_process_req(&vdf);
+        bool earlier = false;
+        for (const auto &proof : vdf.proofs)
+            if (proof.iters == 12000 && (proof.flags & HW_VDF_PROOF_FLAG_IS_REQ))
+                earlier = proof.prev == root && proof.seg_iters == 4000;
+        require(earlier, "Out-of-order request used a checkpoint beyond its target");
+    }
+    {
+        vdf_state vdf{};
+        vdf.interval = HW_VDF_VALUE_INTERVAL;
+        vdf.checkpoint_threshold = 8000;
+        uint16_t checkpoint = hw_queue_proof(&vdf, 8000, HW_VDF_PROOF_NONE, 0);
+        mark_chain_done(vdf, checkpoint);
+        vdf.queued_proofs.clear();
+        for (int repeat = 0; repeat < 2; ++repeat) {
+            hw_request_proof(&vdf, 8000, false);
+            hw_proof_process_req(&vdf);
+            require(vdf.proofs.size() == 1 && vdf.done_proofs.size() == 1,
+                    "Exact completed checkpoint was not queued for delivery");
+            vdf_proof_delivery delivery;
+            require(hw_retrieve_proof(&vdf, &delivery) == 0 && delivery.final.iters == 8000,
+                    "Exact cached checkpoint stalled waiting for another publication");
+            check_frame(delivery);
+            require(vdf.done_proofs.empty(), "Cached checkpoint was delivered twice");
+        }
+    }
+    {
+        vdf_state vdf{};
+        vdf.interval = HW_VDF_VALUE_INTERVAL;
+        vdf.checkpoint_threshold = 8000;
+        uint16_t root = hw_queue_proof(&vdf, 8000, HW_VDF_PROOF_NONE, 0);
+        uint16_t tip = hw_queue_proof(&vdf, 8000, root, 0);
+        mark_chain_done(vdf, tip);
+        vdf.proofs[root].flags |= HW_VDF_PROOF_FLAG_FAILED;
+        vdf.queued_proofs.clear();
+        hw_request_proof(&vdf, 18000, false);
+        hw_proof_process_req(&vdf);
+        uint16_t idx = static_cast<uint16_t>(vdf.proofs.size() - 1);
+        while (idx != HW_VDF_PROOF_NONE) {
+            require(idx != root && idx != tip, "Reused a completed chain with a failed ancestor");
+            idx = vdf.proofs[idx].prev;
+        }
+    }
+    {
+        vdf_state vdf{};
+        vdf.interval = HW_VDF_VALUE_INTERVAL;
+        vdf.checkpoint_threshold = 8000;
+        uint16_t running = hw_queue_proof(&vdf, 8000, HW_VDF_PROOF_NONE,
+                HW_VDF_PROOF_FLAG_STARTED);
+        vdf.queued_proofs.clear();
+        hw_request_proof(&vdf, 12000, false);
+        hw_proof_process_req(&vdf);
+        require(vdf.proofs.size() == 2 && vdf.proofs.back().prev == running,
+                "In-flight checkpoint was duplicated after dispatch");
+        mark_chain_done(vdf, 1);
+        vdf.proofs[running].flags |= HW_VDF_PROOF_FLAG_FAILED;
+        vdf.done_proofs.push_back(1);
+        vdf_proof_delivery delivery;
+        require(hw_retrieve_proof(&vdf, &delivery) < 0 && vdf.done_proofs.empty(),
+                "Failure after reuse allowed an invalid checkpoint chain to be delivered");
+    }
+    struct ReuseCase {
+        uint8_t max_proof_threads;
+        uint8_t segment_threads;
+        bool keep_tip;
+    };
+    const ReuseCase reuse_cases[] = {
+        {1, 2, true},
+        {3, 2, false},
+        {8, 8, true},
+        {8, 2, false},
+        {3, 3, true},
+        {4, 3, false},
+    };
+    for (const ReuseCase &c : reuse_cases) {
+        vdf_state vdf{};
+        vdf.interval = HW_VDF_VALUE_INTERVAL;
+        vdf.checkpoint_threshold = 8000;
+        uint16_t tip = HW_VDF_PROOF_NONE;
+        for (int i = 0; i < HW_VDF_MAX_CHKP_SEGMENTS; ++i)
+            tip = hw_queue_proof(&vdf, 8000, tip, 0);
+        mark_chain_done(vdf, tip);
+        vdf.queued_proofs.clear();
+        vdf.max_aux_threads = 4;
+        vdf.max_proof_threads = c.max_proof_threads;
+        vdf.segment_threads = c.segment_threads;
+        hw_request_proof(&vdf, 2000000, false);
+        hw_proof_process_req(&vdf);
+        const auto &proof = vdf.proofs.back();
+        if (c.keep_tip)
+            require(proof.prev == tip, "Single proof worker discarded the longest cached prefix");
+        else
+            require(proof.prev != tip && proof.seg_iters < 2000000 - vdf.proofs[tip].iters,
+                    "Full checkpoint chain forced a serial tail despite available proof workers");
+        size_t count = 0;
+        for (uint16_t idx = static_cast<uint16_t>(vdf.proofs.size() - 1);
+                idx != HW_VDF_PROOF_NONE; idx = vdf.proofs[idx].prev) ++count;
+        require(count <= HW_VDF_MAX_CHKP_SEGMENTS + 1,
+                "Completed-checkpoint reuse exceeded the wire checkpoint limit");
+    }
+}
+
 // Repeatedly squaring a reduced form stays in a finite set, so the orbit must
 // return to the starting form. The form reached after `steps` squarings is the
 // orbit entry at `steps % period`. An orbit that does not return to the start
@@ -180,7 +360,21 @@ static void initialize_wait_state(vdf_state& vdf) {
 int main() {
     try {
         VdfBaseInit();
+        check_initial_values();
         check_pll_bounds();
+        check_legacy_frequency_adjustment();
+        check_completed_engine_control_mask();
+        check_client_exception_shutdown_policy();
+        check_segment_threads_option();
+        check_segment_threads_accounting();
+        check_segment_threads_validation();
+        check_segment_threads_proofs();
+        check_segment_threads_hw_prover();
+        check_completed_checkpoint_reuse();
+        check_fill_pairing_rule();
+#if defined(CHIKVDF_PAIR_KERNELS)
+        check_paired_fills();
+#endif
         {
             vdf_state vdf{};
             initialize_wait_state(vdf);

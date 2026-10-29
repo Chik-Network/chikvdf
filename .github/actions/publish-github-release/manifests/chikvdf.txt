@@ -20,5 +20,9 @@ chikvdf-darwin-amd64.zip
 chikvdf-darwin-amd64.zip.sha256
 chikvdf-{tag}-windows-amd64.zip
 chikvdf-{tag}-windows-amd64.zip.sha256
+chikvdf-{tag}-windows-amd64-setup.exe
+chikvdf-{tag}-windows-amd64-setup.exe.sha256
 chikvdf-win64.zip
 chikvdf-win64.zip.sha256
+chikvdf-win64-setup.exe
+chikvdf-win64-setup.exe.sha256

@@ -311,15 +311,16 @@ assert_publish_dependencies() {
   fi
 }
 
-# The Windows bundle is intentionally unsigned. These assertions pin that
-# decision so signing credentials cannot creep back in unnoticed, and so the
-# packaging contract (artifact handoff, MSVC setup, script surface) stays
-# intact. Rename win_job if the packaging job is ever renamed again.
 # shellcheck disable=SC2016
 assert_windows_packaging_wiring() {
   client="${root}/.github/workflows/build-client.yml"
   packages="${root}/.github/workflows/build-packages.yml"
   script="${root}/scripts/package-windows-bundle.ps1"
+  installer_script="${root}/scripts/windows-installer.ps1"
+  driver_script="${root}/scripts/get-libft4222.ps1"
+  ftdi_script="${root}/scripts/windows-ftdi-driver.ps1"
+  installer="${root}/installer/windows/chikvdf.iss"
+  inno_action="${root}/.github/actions/install-inno-setup/action.yml"
   win_job=package-windows
   build_block="$(job_block "$client" build)"
   win_block="$(job_block "$client" "$win_job")"
@@ -327,6 +328,14 @@ assert_windows_packaging_wiring() {
 
   if [ -z "$win_block" ]; then
     fail "Windows packaging job ${win_job} is missing"
+  fi
+  # Windows bundles and installers are unsigned: no signing environment, no OIDC
+  # token, and therefore no reason to skip pull requests.
+  if [ -n "$(job_field "$client" "$win_job" environment)" ]; then
+    fail "Windows packaging job still enters a signing environment"
+  fi
+  if [ -n "$(job_field "$client" "$win_job" id-token)" ]; then
+    fail "Windows packaging job still requests id-token"
   fi
   if [ "$(job_field "$client" "$win_job" needs)" != "[build]" ]; then
     fail "Windows packaging job does not need the build job"
@@ -344,48 +353,11 @@ assert_windows_packaging_wiring() {
     fail "Windows packaging job does not limit contents permission to read"
   fi
 
-  # Nothing that can sign may reach the packaging job.
-  if [ -n "$(job_field "$client" "$win_job" environment)" ]; then
-    fail "Windows packaging job still enters a signing environment"
-  fi
-  if [ -n "$(job_field "$client" "$win_job" id-token)" ]; then
-    fail "Windows packaging job still requests id-token"
-  fi
-  if grep -Fq 'AZURE_SIGNING' "$client" "$packages"; then
-    fail "workflows still reference Azure signing secrets"
-  fi
-  if grep -Fq 'sign/azure-windows' "$client"; then
-    fail "client workflow still calls the Azure Windows signing action"
-  fi
-  if grep -Eq 'EXPECTED_SIGNER_SUBJECT|EXPECTED_SIGNER_THUMBPRINT|EXPECTED_VENDOR_SUBJECT' "$client"; then
-    fail "client workflow pins expected signer identities without signing"
-  fi
-  if grep -Eq 'SM_(API_KEY|CLIENT_CERT_FILE_B64|CODE_SIGNING_CERT_SHA1_HASH|CERTKEY_ALIAS)' "$client"; then
-    fail "client workflow still references DigiCert SM_* secrets"
-  fi
-  # A step hidden behind a constant false condition is not a removal. It fails
-  # open the moment someone edits the constant.
-  if printf '%s\n' "$win_block" | grep -Eq '^[[:space:]]+if: 1 == 2$'; then
-    fail "Windows packaging job hides a signing step behind a constant false if"
-  fi
-
-  # The unsigned path must say so, not rely on the variable being absent.
-  if ! printf '%s\n' "$win_block" | grep -Fq "REQUIRE_SIGNATURES: 'false'"; then
-    fail "Windows packaging does not declare that signatures are not verified"
-  fi
-  if ! printf '%s\n' "$win_block" | grep -Fq 'IS_RELEASE: ${{ inputs.is_final }}'; then
-    fail "Windows packaging does not read inputs.is_final"
-  fi
-  if printf '%s\n' "$win_block" | grep -Eq 'REQUIRE_SIGNATURES:|IS_RELEASE:' | grep -q 'github.event_name'; then
-    fail "IS_RELEASE still keys off github.event_name"
-  fi
-
-  # Artifact handoff between the build matrix and the packaging job.
   if ! printf '%s\n' "$build_block" | grep -Fq 'name: windows-amd64-binaries'; then
     fail "build job does not upload windows-amd64-binaries"
   fi
   if ! printf '%s\n' "$win_block" | grep -Fq 'name: windows-amd64-binaries'; then
-    fail "packaging job does not download windows-amd64-binaries"
+    fail "sign job does not download windows-amd64-binaries"
   fi
   if printf '%s\n' "$build_block" | grep -Fq 'name: windows-amd64-bundle'; then
     fail "build job uploads the Windows bundle itself"
@@ -393,35 +365,197 @@ assert_windows_packaging_wiring() {
   if ! printf '%s\n' "$win_block" | grep -Fq 'name: windows-amd64-bundle'; then
     fail "packaging job does not upload windows-amd64-bundle"
   fi
-  if ! printf '%s\n' "$publish_block" | grep -Fq 'pattern: windows-amd64-bundle'; then
-    fail "publish-release does not download windows-amd64-bundle"
+  # The packaging job must say it is unsigned rather than rely on a default.
+  if ! printf '%s\n' "$win_block" | grep -Fq "REQUIRE_SIGNATURES: 'false'"; then
+    fail "Windows packaging does not declare that signatures are not verified"
   fi
-
+  if printf '%s\n' "$win_block" | grep -Fq "REQUIRE_SIGNATURES: 'true'"; then
+    fail "Windows packaging still requires signature verification"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq 'IS_RELEASE: ${{ inputs.is_final }}'; then
+    fail "Windows packaging does not read inputs.is_final"
+  fi
+  if printf '%s\n' "$win_block" | grep -Fq 'sign/azure-windows'; then
+    fail "Windows packaging still calls the Azure Windows signing action"
+  fi
+  if printf '%s\n' "$win_block" | grep -Fq 'sign_files'; then
+    fail "Windows packaging still produces a signing file list"
+  fi
+  if printf '%s\n' "$win_block" | grep -Fq 'ListInstallerSignFile'; then
+    fail "Windows packaging still lists the installer with ListInstallerSignFile"
+  fi
+  if printf '%s\n' "$win_block" | grep -Fq -- '-Action ListSignFiles'; then
+    fail "Windows packaging still lists signing files with ListSignFiles"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq -- '-Action BuildInstaller'; then
+    fail "Windows packaging does not build the installer"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq -- '-Action FinalizeInstaller'; then
+    fail "Windows packaging does not finalize the installer"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq -- '-Action VerifyInstaller'; then
+    fail "Windows packaging does not verify the installer"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq -- '-Action TestInstaller'; then
+    fail "Windows signing does not smoke-test the installer"
+  fi
+  if grep -Fq 'choco install innosetup' "$client" "$inno_action"; then
+    fail "Windows workflow still installs Inno Setup with Chocolatey"
+  fi
+  if ! grep -Fq 'innosetup-6.7.3.exe' "$inno_action" ||
+    ! grep -Fq '9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732' "$inno_action" ||
+    ! grep -Fq 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' "$inno_action"; then
+    fail "Inno Setup action does not pin the official 6.7.3 installer and its SHA-256"
+  fi
+  if [ "$(printf '%s\n' "$win_block" | grep -Fc 'uses: ./.github/actions/install-inno-setup')" -ne 1 ]; then
+    fail "Inno Setup is not installed exactly once in the Windows packaging job"
+  fi
+  if grep -Fq 'Get-ChildItem -Path (Join-Path $base' "$client"; then
+    fail "Windows workflow still has the redundant ISCC lookup loop"
+  fi
+  if printf '%s\n' "$win_block" | grep -Fq 'INSTALLER_SIGTOOL'; then
+    fail "Windows packaging still passes an installer SignTool to ISCC"
+  fi
+  build_line=$(printf '%s\n' "$win_block" | grep -n -F 'name: Build Windows installer' | cut -d: -f1)
+  finalize_line=$(printf '%s\n' "$win_block" | grep -n -F 'name: Finalize Windows installer' | cut -d: -f1)
+  verify_line=$(printf '%s\n' "$win_block" | grep -n -F 'name: Verify Windows installer' | cut -d: -f1)
+  if [ -z "$build_line" ] || [ -z "$finalize_line" ] || [ -z "$verify_line" ] ||
+    [ "$build_line" -ge "$finalize_line" ] || [ "$finalize_line" -ge "$verify_line" ]; then
+    fail "Windows installer build/finalize/verify steps are out of order"
+  fi
+  if ! printf '%s\n' "$build_block" | grep -Fq 'src/hw/libft4222/driver/**'; then
+    fail "Windows build artifact does not upload the staged FTDI driver"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq 'src/hw/libft4222/driver/ftdibus.inf'; then
+    fail "Windows packaging does not verify the staged FTDI driver"
+  fi
+  if ! printf '%s\n' "$win_block" | grep -Fq 'tests/test_windows_installer_version.ps1'; then
+    fail "Windows packaging job does not run the installer version regression test"
+  fi
   if ! printf '%s\n' "$win_block" | grep -Fq 'step-security/msvc-dev-cmd@v1.13.1'; then
     fail "Windows packaging job does not set up the MSVC environment"
   fi
   if grep -Fq 'ilammy/msvc-dev-cmd' "$client"; then
     fail "Windows workflow still uses ilammy/msvc-dev-cmd"
   fi
+  if printf '%s\n' "$win_block" | grep -Eq 'EXPECTED_SIGNER_SUBJECT|EXPECTED_SIGNER_THUMBPRINT|EXPECTED_VENDOR_SUBJECT'; then
+    fail "Windows packaging pins expected signer identities without signing"
+  fi
+  if grep -Fq 'AZURE_SIGNING' "$client" "$packages"; then
+    fail "workflows still reference Azure signing secrets"
+  fi
+  if ! printf '%s\n' "$publish_block" | grep -Fq 'pattern: windows-amd64-bundle'; then
+    fail "publish-release does not download windows-amd64-bundle"
+  fi
 
-  # The script keeps its verification surface. REQUIRE_SIGNATURES='false'
-  # bypasses only the Authenticode assertions, never the import closure.
+  if ! grep -Fq "ValidateSet('Assemble', 'ListSignFiles', 'Package', 'BuildInstaller', 'FinalizeInstaller', 'VerifyInstaller', 'TestInstaller')" "$script"; then
+    fail "Windows script does not expose the installer actions"
+  fi
+  if grep -Fq 'ListInstallerSignFile' "$script" "$installer_script" "$client"; then
+    fail "ListInstallerSignFile is still present"
+  fi
+  for ps_file in "$script" "$installer_script"; do
+    lines=$(wc -l < "$ps_file")
+    if [ "$lines" -ge 1000 ]; then
+      fail "$(basename "$ps_file") has $lines lines (limit is 999)"
+    fi
+  done
+  if ! grep -Fq 'ftdibus.inf' "$installer" || ! grep -Fq 'pnputil.exe' "$installer"; then
+    fail "Inno Setup script does not stage the FTDI driver"
+  fi
+  if ! grep -Fq 'DisableDirPage=auto' "$installer"; then
+    fail "Inno Setup script does not use DisableDirPage=auto"
+  fi
+  if ! grep -Fq 'SignedUninstaller=yes' "$installer" ||
+    ! grep -Fq 'SignTool={#MySignTool}' "$installer"; then
+    fail "Inno Setup script does not enable a signed uninstaller"
+  fi
+  if grep -Fq 'DefaultGroupName=' "$installer" ||
+    grep -Fq 'RestartIfNeededByRun' "$installer" ||
+    grep -Fq 'PrivilegesRequiredOverridesAllowed=' "$installer"; then
+    fail "Inno Setup script still has directives that do nothing"
+  fi
+  if ! grep -Fq 'UninstallDisplayName=chikvdf' "$installer" ||
+    grep -Eq 'UninstallDisplayName=chikvdf \{#' "$installer"; then
+    fail "Inno Setup uninstall display name still contains the version"
+  fi
+  # Installer behaviour is covered by compiling and running the .iss under a
+  # real Inno Setup, not by grepping its Pascal source in this test.
+  if ! grep -Fq 'Install-Ftd2xxDriver' "$driver_script" ||
+    ! grep -Fq 'windows-ftdi-driver.ps1' "$driver_script" ||
+    ! grep -Fq 'Assert-FtdiDriverSource' "$driver_script"; then
+    fail "FT4222 fetch script does not use the shared FTDI driver validator"
+  fi
+  if ! grep -Fq 'windows-ftdi-driver.ps1' "$script" ||
+    ! grep -Fq 'Assert-FtdiDriverSource' "$installer_script"; then
+    fail "Windows packaging does not use the shared FTDI driver validator"
+  fi
+  if ! grep -Fq 'Microsoft Windows Hardware Compatibility Publisher' "$ftdi_script" ||
+    grep -Fq 'EXPECTED_VENDOR_SUBJECT' "$ftdi_script" ||
+    grep -Fq 'Microsoft|FTDI|Future Technology' "$ftdi_script"; then
+    fail "FTDI catalog signer check is not pinned to the exact publisher CN"
+  fi
+  if ! grep -Fq 'Assert-Authenticode -Path' "$installer_script" ||
+    grep -Fq 'Assert-InstallerSignature' "$installer_script"; then
+    fail "Installer signature verification does not reuse Assert-Authenticode"
+  fi
+  if ! grep -Fq 'Publish-ReleaseAlias' "$script" ||
+    ! grep -Fq 'Publish-ReleaseAlias' "$installer_script" ||
+    grep -Fq 'Publish-InstallerAlias' "$installer_script"; then
+    fail "Installer alias publishing does not reuse the shared alias helper"
+  fi
+  if ! grep -Fq "Require-Text 'INSTALLER_SIGNTOOL'" "$installer_script" ||
+    ! grep -Fq '/SChikSignTool=' "$installer_script"; then
+    fail "Installer build does not pass the workflow SignTool to ISCC"
+  fi
+  if ! grep -Fq '/DRIVER=1' "$installer_script" ||
+    ! grep -Fq '/enum-drivers' "$installer_script" ||
+    ! grep -Fq 'Get-MachinePathEntryCount' "$installer_script"; then
+    fail "Installer smoke test does not exercise the driver, driver store, and PATH dedupe"
+  fi
+  if ! grep -Fq 'if ($env:CI)' "$installer_script" ||
+    ! grep -Fq 'must run elevated in CI' "$installer_script"; then
+    fail "Installer smoke test does not fail when non-elevated in CI"
+  fi
   if ! grep -Fq "Require-Flag 'REQUIRE_SIGNATURES'" "$script"; then
     fail "Windows script does not require REQUIRE_SIGNATURES for Package"
   fi
-  if ! grep -Fq 'Assert-ImportClosure' "$script"; then
-    fail "Windows script does not verify the DLL import closure"
-  fi
   if ! grep -Fq 'Get-AuthenticodeSignature' "$script"; then
-    fail "Windows script lost its publisher signature verification"
+    fail "Windows script does not verify publisher signatures"
+  fi
+  if ! grep -Fq 'TimeStamperCertificate' "$script"; then
+    fail "Windows script does not require a signature timestamp"
+  fi
+  if ! grep -Fq 'EXPECTED_SIGNER_SUBJECT' "$script" ||
+    ! grep -Fq 'EXPECTED_SIGNER_THUMBPRINT' "$script" ||
+    ! grep -Fq 'EXPECTED_VENDOR_SUBJECT' "$script"; then
+    fail "Windows script does not support expected signer variables"
   fi
   if grep -Fq 'REQUEST_WINDOWS_SIGNING' "$script" || grep -Fq 'HAS_WINDOWS_SIGNING_SECRET' "$script"; then
     fail "Windows script still references the old DigiCert signing flags"
   fi
+  if grep -Fq "ValidateSet('Assemble', 'Sign', 'Package')" "$script"; then
+    fail "Windows script still exposes the removed local Sign action"
+  fi
+  if grep -E 'REQUIRE_SIGNATURES:|IS_RELEASE:' "$client" | grep -q 'github.event_name'; then
+    fail "signing or IS_RELEASE still keys off github.event_name"
+  fi
+  if grep -Eq 'SM_(API_KEY|CLIENT_CERT_FILE_B64|CODE_SIGNING_CERT_SHA1_HASH|CERTKEY_ALIAS)' "$client"; then
+    fail "client workflow still references DigiCert SM_* secrets"
+  fi
+  for asset in \
+    'chikvdf-{tag}-windows-amd64-setup.exe' \
+    'chikvdf-{tag}-windows-amd64-setup.exe.sha256' \
+    'chikvdf-win64-setup.exe' \
+    'chikvdf-win64-setup.exe.sha256'; do
+    if ! grep -Fq "$asset" "${manifest_dir}/chikvdf.txt"; then
+      fail "release manifest is missing ${asset}"
+    fi
+  done
 }
 
 # macOS bundles are neither Developer ID signed nor notarized. The packaging
-# script owns the decision; this pins the workflow side so the certificate
+# script owns that decision; this pins the workflow side so the certificate
 # imports and the Apple secrets cannot come back unnoticed.
 # shellcheck disable=SC2016
 assert_macos_packaging_wiring() {
@@ -454,10 +588,10 @@ assert_macos_packaging_wiring() {
   fi
 }
 
-# Publishing must depend only on the GitHub token. The release path used to
-# require a GLUE_URL and die without it, which blocked releases whenever the
-# GLUE_API_URL secret was absent. Publishing now runs every check above with no
-# GLUE_URL in the environment at all, so that failure cannot recur silently.
+# Publishing depends only on the GitHub token. The release path used to require
+# a GLUE_URL and die without it, which blocked releases whenever the
+# GLUE_API_URL secret was absent. Every publish check above now runs with no
+# GLUE_URL in the environment at all.
 # shellcheck disable=SC2016
 assert_no_glue_wiring() {
   local action="${root}/.github/actions/publish-github-release/action.yml"

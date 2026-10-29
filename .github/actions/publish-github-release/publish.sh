@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Upload one complete GitHub release asset set.
-# A non-final release skips. A final release with a missing file, a bad digest,
-# or an unsafe tag uploads nothing.
+# A non-final release skips. A final release with a missing file, a bad
+# digest, or an unsafe tag uploads nothing.
 set -euo pipefail
 
 die() {

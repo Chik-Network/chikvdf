@@ -146,7 +146,12 @@ endif()
 # CMake 3.14+
 include(FetchContent)
 
-set(VDF_COMMON_DEFINITIONS VDF_MODE=0 FAST_MACHINE=1)
+set(VDF_MODE 0 CACHE STRING "VDF_MODE compile definition (0 = production, 1 = test mode with asserts)")
+set_property(CACHE VDF_MODE PROPERTY STRINGS 0 1)
+if(NOT VDF_MODE STREQUAL "0" AND NOT VDF_MODE STREQUAL "1")
+  message(FATAL_ERROR "VDF_MODE must be 0 (production) or 1 (test mode), got: ${VDF_MODE}")
+endif()
+set(VDF_COMMON_DEFINITIONS VDF_MODE=${VDF_MODE} FAST_MACHINE=1)
 list(APPEND VDF_COMMON_DEFINITIONS CHIKVDF_VERSION=\"${CHIKVDF_VERSION}\")
 if(GENERATE_ASM_TRACKING_DATA)
   list(APPEND VDF_COMMON_DEFINITIONS GENERATE_ASM_TRACKING_DATA=1)
@@ -321,18 +326,25 @@ endfunction()
 function(vdf_add_windows_clang_opts target_name)
   if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if(MSVC)
+      # Sensor/operating-point validation must retain NaN and infinity checks.
+      set(fp_mode fast)
+      if("PRESERVE_NONFINITE" IN_LIST ARGN)
+        set(fp_mode precise)
+      endif()
       target_compile_options(
         ${target_name}
         PRIVATE
         "$<$<COMPILE_LANGUAGE:C,CXX>:/O2>"
-        "$<$<COMPILE_LANGUAGE:C,CXX>:/fp:fast>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:/fp:${fp_mode}>"
         "$<$<COMPILE_LANGUAGE:C,CXX>:/clang:-fno-math-errno>"
         "$<$<COMPILE_LANGUAGE:C,CXX>:/clang:-Wno-unused-command-line-argument>"
-        # Finite-math mode can trigger this in transitive/system headers on clang-cl.
-        # Keep this suppression target-scoped to fast-math targets only.
-        "$<$<COMPILE_LANGUAGE:C,CXX>:/clang:-Wno-nan-infinity-disabled>"
         "$<$<COMPILE_LANGUAGE:CXX>:/clang:-Wno-deprecated-literal-operator>"
       )
+      if(fp_mode STREQUAL "fast")
+        # Finite-math mode can trigger this in transitive/system headers on clang-cl.
+        target_compile_options(${target_name} PRIVATE
+          "$<$<COMPILE_LANGUAGE:C,CXX>:/clang:-Wno-nan-infinity-disabled>")
+      endif()
     else()
       target_compile_options(
         ${target_name}
@@ -415,7 +427,7 @@ if(BUILD_VDF_TESTS)
   add_executable(regression_unit_tests
     ${CMAKE_CURRENT_SOURCE_DIR}/regression_unit_tests.cpp
   )
-  target_sources(regression_unit_tests PRIVATE ${VDF_COMMON_SOURCES} ${VDF_ASM_SOURCES})
+  target_sources(regression_unit_tests PRIVATE ${VDF_COMMON_SOURCES} ${VDF_ASM_SOURCES} ${CMAKE_CURRENT_SOURCE_DIR}/hw/timelord_live_control.cpp ${CMAKE_CURRENT_SOURCE_DIR}/pair_kernels.cpp)
   target_compile_definitions(regression_unit_tests PRIVATE ${VDF_COMMON_DEFINITIONS})
   vdf_add_boost_includes(regression_unit_tests)
   target_link_libraries(
@@ -430,7 +442,7 @@ if(BUILD_VDF_TESTS)
     # Generated asm objects use absolute relocations; disable PIE for this target.
     target_link_options(regression_unit_tests PRIVATE -no-pie)
   endif()
-  vdf_add_windows_clang_opts(regression_unit_tests)
+  vdf_add_windows_clang_opts(regression_unit_tests PRESERVE_NONFINITE)
   gtest_discover_tests(
     regression_unit_tests
     TEST_PREFIX "regression.unit."
@@ -455,11 +467,15 @@ if(BUILD_HW_TOOLS)
   set(HW_COMMON_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/vdf_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/prover_runtime.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/pair_kernels.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_util.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_proof.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_proof_fill.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_proof_queue.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_timelord_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_interface.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_live_control.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hw/timelord_live_control.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/chik_driver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/ftdi_driver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/vdf_driver.cpp
@@ -512,7 +528,7 @@ if(BUILD_HW_TOOLS)
   target_compile_definitions(hw_test PRIVATE ${VDF_COMMON_DEFINITIONS})
   target_include_directories(hw_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/hw ${CMAKE_CURRENT_SOURCE_DIR}/hw/libft4222)
   target_link_libraries(hw_test PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads ${HW_LIBS})
-  vdf_add_windows_clang_opts(hw_test)
+  vdf_add_windows_clang_opts(hw_test PRESERVE_NONFINITE)
   if(APPLE)
     target_link_options(hw_test PRIVATE "-Wl,-rpath,@executable_path/hw/libft4222")
   endif()
@@ -525,7 +541,7 @@ if(BUILD_HW_TOOLS)
   target_compile_definitions(hw_vdf_client PRIVATE ${VDF_COMMON_DEFINITIONS})
   target_include_directories(hw_vdf_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/hw ${CMAKE_CURRENT_SOURCE_DIR}/hw/libft4222)
   target_link_libraries(hw_vdf_client PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads ${HW_LIBS} ${HW_SOCKET_LIBS})
-  vdf_add_windows_clang_opts(hw_vdf_client)
+  vdf_add_windows_clang_opts(hw_vdf_client PRESERVE_NONFINITE)
   if(APPLE)
     target_link_options(hw_vdf_client PRIVATE "-Wl,-rpath,@executable_path/hw/libft4222")
   endif()
@@ -537,7 +553,7 @@ if(BUILD_HW_TOOLS)
   target_compile_definitions(emu_hw_test PRIVATE ${VDF_COMMON_DEFINITIONS})
   target_include_directories(emu_hw_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/hw ${CMAKE_CURRENT_SOURCE_DIR}/hw/libft4222)
   target_link_libraries(emu_hw_test PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads)
-  vdf_add_windows_clang_opts(emu_hw_test)
+  vdf_add_windows_clang_opts(emu_hw_test PRESERVE_NONFINITE)
 
   add_executable(emu_hw_vdf_client
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_vdf_client.cpp
@@ -546,7 +562,7 @@ if(BUILD_HW_TOOLS)
   target_compile_definitions(emu_hw_vdf_client PRIVATE ${VDF_COMMON_DEFINITIONS})
   target_include_directories(emu_hw_vdf_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/hw ${CMAKE_CURRENT_SOURCE_DIR}/hw/libft4222)
   target_link_libraries(emu_hw_vdf_client PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads ${HW_SOCKET_LIBS})
-  vdf_add_windows_clang_opts(emu_hw_vdf_client)
+  vdf_add_windows_clang_opts(emu_hw_vdf_client PRESERVE_NONFINITE)
   if(UNIX AND NOT APPLE)
     target_link_options(emu_hw_vdf_client PRIVATE -no-pie)
   endif()
@@ -554,11 +570,15 @@ if(BUILD_HW_TOOLS)
   add_executable(hw_proof_wait_test
     ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_proof_wait_test.cpp
   )
-  target_sources(hw_proof_wait_test PRIVATE ${HW_COMMON_SOURCES} ${EMU_SOURCES} ${HW_VDF_ASM_SOURCES} ${VDF_COMMON_SOURCES})
+  # The loop fixture substitutes only the supervisor boundary; all polling,
+  # completion handling and emulated USB/proof code remain the production code.
+  set(HW_PROOF_TEST_SOURCES ${HW_COMMON_SOURCES})
+  list(REMOVE_ITEM HW_PROOF_TEST_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/hw/hw_live_control.cpp)
+  target_sources(hw_proof_wait_test PRIVATE ${HW_PROOF_TEST_SOURCES} ${EMU_SOURCES} ${HW_VDF_ASM_SOURCES} ${VDF_COMMON_SOURCES})
   target_compile_definitions(hw_proof_wait_test PRIVATE ${VDF_COMMON_DEFINITIONS})
   target_include_directories(hw_proof_wait_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/hw ${CMAKE_CURRENT_SOURCE_DIR}/hw/libft4222)
-  target_link_libraries(hw_proof_wait_test PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads)
-  vdf_add_windows_clang_opts(hw_proof_wait_test)
+  target_link_libraries(hw_proof_wait_test PRIVATE ${GMP_LIBRARIES} ${GMPXX_LIBRARIES} Threads::Threads ${HW_SOCKET_LIBS})
+  vdf_add_windows_clang_opts(hw_proof_wait_test PRESERVE_NONFINITE)
   if(UNIX AND NOT APPLE)
     # Generated asm objects use absolute relocations; disable PIE for this target.
     target_link_options(hw_proof_wait_test PRIVATE -no-pie)

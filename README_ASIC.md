@@ -44,26 +44,71 @@ The boards are passively air cooled. The client writes 100 °C external and engi
 
 ## Install a published build
 
-### Linux (amd64 package)
+The easiest install path on each platform is the package manager: Homebrew on
+macOS, winget on Windows, and apt on Debian and Ubuntu. Release archives are
+also attached to each GitHub release.
 
-The apt repository `https://repo.chiknetwork.com/chikvdf-hw/debian/` is the published `amd64` index (`Architectures: amd64` in the `stable` Release file). Its package name is still `chikvdf-hw`. A `.deb` built by this tree is `chikvdf_<version>-1_<arch>.deb` with `Package: chikvdf`. The package built by this tree installs:
+### Linux (apt)
+
+Add the Chik apt repository and install the package:
+
+```bash
+sudo apt-get update
+sudo apt-get install ca-certificates curl gnupg
+curl -sL https://repo.chik.net/FD39E6D3.pubkey.asc | sudo gpg --dearmor -o /usr/share/keyrings/chik.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/chik.gpg] https://repo.chik.net/chikvdf/debian/ stable main" | sudo tee /etc/apt/sources.list.d/chikvdf.list
+sudo apt-get update
+sudo apt-get install chikvdf
+```
+
+The package installs:
 
 - `/usr/bin/vdf_client`, `vdf_bench`, `hw_vdf_client`, `hw_test`, `emu_hw_vdf_client`, `emu_hw_test`
 - `/usr/lib/libft4222.so` (SONAME `libft4222.so`)
 - `/etc/udev/rules.d/99-chikvdf.rules`
 
+The package depends on `libgmp-dev` and `libboost-system-dev`. The apt index
+publishes `amd64` and `arm64`; other architectures build from source. A
+`.deb` built by this tree is `chikvdf_<version>-1_<arch>.deb` with
+`Package: chikvdf`. The `chikvdf-hw` package in the
+`https://repo.chiknetwork.com/chikvdf-hw/debian/` repository is an amd64-only ASIC
+index that installs the same binaries.
+
+The package workflow (`.github/workflows/build-packages.yml` calling
+`build-client.yml`) runs `dpkg-deb` on that tree.
+
+### macOS (Homebrew)
+
+Install through the [Chik Homebrew tap](https://github.com/Chik-Network/homebrew-chik):
+
 ```bash
-sudo apt-get update
-sudo apt-get install ca-certificates curl gnupg
-curl -sL https://repo.chiknetwork.com/FD39E6D3.pubkey.asc | sudo gpg --dearmor -o /usr/share/keyrings/chik.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/chik.gpg] https://repo.chiknetwork.com/chikvdf-hw/debian/ stable main" | sudo tee /etc/apt/sources.list.d/chikvdf-hw.list
-sudo apt-get update
-sudo apt-get install chikvdf-hw
+brew install chik-network/chik/chikvdf
 ```
 
-The package depends on `libgmp-dev` and `libboost-system-dev`. The apt index is amd64-only; final GitHub releases also attach `chikvdf_<version>-1_arm64.deb`. Other architectures build from source.
+This installs `hw_vdf_client`, `hw_test`, and the emulators alongside
+`vdf_client` and `vdf_bench`. The bundled FTDI libraries are installed under
+`libexec/chikvdf`. Install the FTDI D2XX driver from
+https://ftdichip.com/products/ft4222h/ before connecting a board.
 
-The package workflow (`.github/workflows/build-packages.yml` calling `build-client.yml`) runs `dpkg-deb` on that tree. The apt package name in the published index is `chikvdf-hw`; release assets produced here use `chikvdf`.
+### Windows (winget)
+
+```powershell
+winget install --id Chik.chikvdf --exact
+```
+
+The winget package is a machine-scope Inno Setup installer. It installs
+`hw_vdf_client.exe`, `hw_test.exe`, and the emulators alongside
+`vdf_client.exe` and `vdf_bench.exe` in
+`%ProgramFiles%\Chik\chikvdf\bin`, adds that directory to the system `PATH`,
+and stages the FTDI CDM driver (`ftdibus.inf` and `ftdiport.inf`) with
+`pnputil`. It requires x64 Windows 10 version 2004 or newer and
+administrator/UAC. If you cannot elevate, use the
+portable `chikvdf-<version>-windows-amd64.zip` from a
+[release](https://github.com/Chik-Network/chikvdf/releases) and install the
+FTDI D2XX driver from https://ftdichip.com/products/ft4222h/ manually. The
+installer leaves the shared FTDI driver in the driver store on uninstall.
+Open a new terminal after installation so the updated `PATH` is visible.
+Details are in `assets/windows-installer.md`.
 
 ### macOS release archive and package
 
@@ -85,9 +130,9 @@ libexec/chikvdf/libgmpxx.<version>.dylib
 
 Run `bin/hw_vdf_client`. The bundle's rpath is `@loader_path/../libexec/chikvdf`, so the FTDI and GMP dylibs resolve next to `bin/` with no `DYLD_LIBRARY_PATH`. Release staging rewrites the Homebrew GMP install names to `@rpath/<basename>` and copies those dylibs into `libexec/chikvdf`. The `.pkg` installs the same tree under `/usr/local` (`/usr/local/bin`, `/usr/local/libexec/chikvdf`). Details of signing are in `assets/macos-release-bundle.md`.
 
-### Windows release zip
+### Windows release assets
 
-A release uploads `chikvdf-<version>-windows-amd64.zip` and a copy named `chikvdf-win64.zip` (the winget asset). Layout:
+A release uploads `chikvdf-<version>-windows-amd64.zip` and a copy named `chikvdf-win64.zip` (the portable winget fallback), plus `chikvdf-<version>-windows-amd64-setup.exe` and `chikvdf-win64-setup.exe` (the winget installer asset). The portable zip layout is:
 
 ```text
 bin\hw_vdf_client.exe
@@ -103,7 +148,12 @@ bin\<mpir cpu variants>
 bin\<VC++ 2015-2022 runtime DLLs, such as VCRUNTIME140.dll and MSVCP140.dll>
 ```
 
-Optimized Windows builds outside pull requests sign the six chikvdf executables and the MPIR DLLs with Azure Artifact Signing before the zip is uploaded or published; the FTDI and VC++ runtime DLLs keep their vendor signatures. Details are in `assets/windows-release-signing.md`.
+The setup exe installs that `bin\` tree under
+`%ProgramFiles%\Chik\chikvdf\bin`, plus the unmodified FTDI CDM package under
+`%ProgramFiles%\Chik\chikvdf\driver`, and adds the `bin` directory to the
+machine `PATH`.
+
+Optimized Windows builds outside pull requests sign the six chikvdf executables, the MPIR DLLs, and the setup exe with Azure Artifact Signing before the assets are uploaded or published; the FTDI and VC++ runtime DLLs keep their vendor signatures. Details are in `assets/windows-release-signing.md`.
 
 The zip has a flat `bin\` and no `lib\`. The loader looks in the executable's directory, then System32, the Windows directory, the current directory, and `PATH`; it does not search a sibling `lib\`. Every non-system import of every shipped executable and DLL is in `bin\` under the exact name in its import table. That includes the MPIR CPU variants beside `mpir.dll` and the VC++ 2015-2022 runtime copied from the MSVC redist. Run the extracted binaries directly:
 
@@ -111,7 +161,7 @@ The zip has a flat `bin\` and no `lib\`. The loader looks in the executable's di
 .\bin\hw_vdf_client.exe --list
 ```
 
-Install the FTDI D2XX driver before that. `scripts/get-libft4222.ps1` stages `LibFT4222-64.dll` plus the `ftd2xx.lib` import library, and fetches the native amd64 `FTD2XX.dll` from FTDI CDM 2.12.36.20. The kernel driver is the D2XX/CDM package from the FT4222H downloads page: https://ftdichip.com/products/ft4222h/
+For the portable zip, install the FTDI D2XX driver before running the ASIC tools. `scripts/get-libft4222.ps1` stages `LibFT4222-64.dll` plus the `ftd2xx.lib` import library, fetches the native amd64 `FTD2XX.dll` from FTDI CDM 2.12.36.20, and stages the unmodified CDM driver package under `src\hw\libft4222\driver` for the installer build. The kernel driver is the D2XX/CDM package from the FT4222H downloads page: https://ftdichip.com/products/ft4222h/
 
 ## Build from source
 
@@ -121,9 +171,9 @@ Versions pinned by the fetch scripts:
 | --- | --- | --- |
 | Linux x86_64 and aarch64/arm64 | `scripts/get-libft4222.sh` | libft4222 1.4.4.170 from `download.chiknetwork.com` |
 | macOS | same script | LibFT4222 1.4.4.190 plus `libftd2xx.dylib` |
-| Windows | `scripts/get-libft4222.ps1` | LibFT4222 1.4.8 plus native `FTD2XX.dll` from CDM 2.12.36.20 |
+| Windows | `scripts/get-libft4222.ps1` | LibFT4222 1.4.8 plus native `FTD2XX.dll` and the driver package from CDM 2.12.36.20 |
 
-`install` downloads and stages headers and libraries. `clean` removes them. Linux and macOS place a symlink at `src/hw/libft4222`. Windows copies headers, import libraries, and DLLs into `src\hw\libft4222`.
+`install` downloads and stages headers and libraries. `clean` removes them. Linux and macOS place a symlink at `src/hw/libft4222`. Windows copies headers, import libraries, and DLLs into `src\hw\libft4222` and stages the unmodified FTDI CDM package under `src\hw\libft4222\driver` for the installer build.
 
 ### Linux
 
@@ -362,6 +412,7 @@ List of options [default, min - max]:
   --proof-threads N - number of proof threads per VDF engine
   --retain-asic-values - use recent ASIC samples for off-grid proof endpoints
   --checkpoint-threshold N - keep each segment at most N iterations when that fits in 61 checkpoints [1000000, 8000 - 4294967295]
+  --segment-threads N - number of threads that share each proof segment [2, 1 - 8]
   --auto-freq-period N - auto-adjust frequency every N seconds [0, 10 - inf]
   --max-freq N - max frequency while auto-freq is on [3000]
   --version - print version and exit
@@ -378,9 +429,10 @@ List of options [default, min - max]:
 | `--device-loc` | Location id printed by `--list`. `0`, the default, selects the first interface-A board. A nonzero value must match a location id exactly. |
 | `--vdfs-mask` | Bit 0 (value 1) is engine 0, bit 1 (value 2) is engine 1, bit 2 (value 4) is engine 2. `0`, the parser default, means "the first `N_VDFS` engines", which is 7 when `N_VDFS` is 3. That is why the usage line shows 7. A non-zero mask is used as given, and `N_VDFS` does not change it. Values above 7 are rejected. |
 | `--vdf-threads` | Host threads per engine for intermediates and proofs. Default 4. Range 2–64. |
-| `--proof-threads` | How many of those threads may sit in proofs. Omitted, or set to 0, it is `vdf-threads - ceil(vdf-threads / 8)` (3 when `vdf-threads` is 4). Any other explicit value must be less than `--vdf-threads`. |
+| `--proof-threads` | How many of those threads may sit in proofs. Omitted, or set to 0, it is `vdf-threads - ceil(vdf-threads / 8)` (3 when `vdf-threads` is 4). Any other explicit value must be less than `--vdf-threads`. A proof starts while the used count is below this value, and each proof uses `--segment-threads` of it, so at least one proof runs and the concurrent proof count is `ceil(proof-threads / segment-threads)`. |
 | `--retain-asic-values` | Opt-in. Keeps up to 64 recent validated ASIC forms and reuses one for an off-grid proof endpoint when the forward check matches. The cache clears on recovery and on each new challenge. |
 | `--checkpoint-threshold` | Iterations per checkpoint segment, aligned to the 4,000-iteration value interval. Accepted range 8000–4294967295; default 1,000,000. A request is split only while the protocol's 61-checkpoint room allows it; a longer span uses a larger chunk. |
+| `--segment-threads` | Host threads that share one proof segment. Default 2, range 1–8; out-of-range values are rejected. Raising it shortens a single long segment but uses more CPU per proof. Each proof runs on its worker thread plus N-1 extra threads, which are not taken from `--vdf-threads`. Each proof counts as this many threads toward `--proof-threads`. The proof bytes do not depend on this value. |
 | `--auto-freq-period` | Enables auto-freq and sets the period in seconds. Minimum 10. Omitted, auto-freq stays off. |
 | `--max-freq` | Upper bound used only while auto-freq is on. Default is the last PLL entry, 3000 MHz, which is above the `--freq` ceiling. The parser stores the number `strtod` returns. |
 | `--list` | Print interface-A devices and exit. |
@@ -471,6 +523,106 @@ macOS launchd, with `caffeinate` so the USB session survives idle sleep. Replace
 Install the plist as a LaunchAgent for the logged-in user; a LaunchDaemon runs it as root.
 
 This repo does not ship a Windows service. Run `hw_vdf_client.exe` in a console that will not sleep, or register that command with Task Scheduler at logon. A release zip has every DLL in `bin\`, so no `PATH` change is needed.
+
+## Supervisor control and telemetry
+
+On macOS and Linux, `hw_vdf_client --live-control PORT [N_VDFS]` lets a supervisor
+change clock and voltage without replacing the client. This mode requires anonymous
+or named pipes on stdin and stdout and cannot be combined with `--auto-freq-period`.
+It uses the existing USB owner thread; it opens no control socket. Human-readable
+logs and raw telemetry remain on stderr. The supervisor should keep draining stderr
+and wait for each acknowledgement before sending another command. Control polling
+uses a monotonic 100 ms deadline rather than a loop-turn count. A slow USB operation
+or other owner-thread work can still delay a command beyond that interval.
+
+Commands and replies are newline-delimited ASCII:
+
+```text
+TLSET 1 1 1880 1.0
+TLACK 1 1 1880.000000 1.000000
+```
+
+The fields are protocol version, a strictly increasing positive request ID,
+frequency in MHz, and requested voltage in V. Frames are bounded to 256 input
+bytes. The live-control limits are 200–2200 MHz and 0.7–1.0 V. The selected PLL
+entry uses the same ceiling selection as startup and must be within 1 MHz of the
+request; unsupported requests are rejected. The bounds and tolerances are defined
+in `timelord_control::Limits`.
+The probes `--control-version` and `--control-frequencies` use the regular option
+parser and print the protocol identifier and JSON frequency list respectively, before opening USB.
+These control options are unavailable on Windows; `--live-control` fails there.
+
+Before a change, the client requires a valid temperature below 55°C, pauses the
+running engines and reads the current clock/voltage. It raises voltage before
+changing clock and lowers voltage afterward, then checks actual readback before
+resuming the previously running engines. Both readback stages permit three reads,
+20 ms apart; only reads are retried, never PLL or voltage writes. Frequency tolerance
+is 1 MHz and voltage tolerance is 0.0063 V. Failed samples log the stage, attempt,
+clock-register values and individual register-read errors. These bounds are
+software guardrails, not a characterization of the silicon's operating limits.
+
+A rejected operation is fatal: a `TLERR` is a failure notification, not permission
+to send the next command. Replies and exit behavior are:
+
+| Condition | Reply | Result |
+| --- | --- | --- |
+| Valid command; hardware change and readback succeed | `TLACK 1 ID MHz V` | Continue running |
+| Parsed request selects an unsupported PLL frequency or fails temperature, write, or readback checks | `TLERR 1 ID reason`, if writable | Checked shutdown; exit 70 |
+| Unknown exception while applying a parsed request | `TLERR 1 ID unknown`, if writable | Checked shutdown; exit 70 |
+| Malformed/oversized frame, invalid bounds/version/ID, or repeated ID | No reply | Checked shutdown; exit 70 |
+| Controller EOF, pipe I/O error, closed/full reply pipe, or node-socket exception | No guaranteed control reply | Checked shutdown; exit 70 |
+| Channel setup fails at startup | No protocol reply; stderr diagnostic | Exit 1 before USB initialization |
+
+Failed temperature reads are reported as `temperature_unavailable`, separately from
+`temperature_limit`; valid zero or subzero readings are not read errors. Checked
+shutdown attempts to pause every selected engine, checks the result, restores a low
+operating point (200 MHz / requested 0.7 V) without resuming engines, stops proof
+workers, closes node connections and USB, and exits with status 70. Failed pause
+writes fall back to board reset. The shutdown log reports whether quiescence and
+restoration were confirmed; a failed USB link cannot guarantee either. SIGPIPE is
+suppressed only for the writing thread during individual pipe/socket writes,
+without changing the process signal handler. The supervisor owns delayed restart
+policy.
+
+The channel borrows stdin/stdout and makes them nonblocking while active, so a
+supervisor that stops reading replies cannot stall the USB owner. Their original
+file-status flags are restored when the channel stops or is destroyed, including
+a failed setup after one descriptor has changed. These flags are shared with any
+aliases of the same open file description while the channel is active; `dup` alone
+would not isolate them. Supervisors should provide dedicated control pipes.
+
+Legacy `--auto-freq-period` remains a clock-only pause/write/resume operation over
+the full PLL table. It does not read or write regulator voltage or use supervised
+temperature/readback validation. Driver failures and PLL-table boundaries are
+logged and do not introduce a new exception path. A failed register write while
+programming the clock makes the frequency change fail (logged; the client keeps
+running), rather than being ignored. Without `--live-control`, an event-loop
+exception is logged, proof workers and connections are cleaned up, USB is closed,
+and the client exits 1; it does not request the supervised low operating point or
+board-reset fallback.
+
+`--raw-speed` enables `TLRAW 2 ENGINE IPS STATE` records on stderr, approximately
+once a second per running engine. `--live-control` enables these records too.
+`ENGINE` is the zero-based physical engine number. `STATE` is `running`, `sampling`
+or `idle`; the latter two use `IPS=-1`. Counter rollback, a new challenge session
+or return from idle resets the rate baseline. Rates use differences between already
+read iteration counters and add no USB reads. They exclude proof construction and
+must not be interpreted as verified proof throughput or summed across independent
+chains. Ordinary clients do not emit these extra raw-speed records unless requested.
+
+In live-control mode, temperature polling also has a monotonic five-second
+deadline, including when all engines are idle. Temperature-only reads do not start
+engines or deserialize VDF values. This keeps supervisors informed while an infused
+chain has no work. Ordinary clients retain their existing polling behavior.
+
+The `HardwareLiveControl` and `HardwareTelemetry` regression tests use fake register
+adapters and local pipes, without a node or USB device:
+
+```sh
+cmake -S src -B build-tests -DBUILD_PYTHON=OFF -DBUILD_VDF_TESTS=ON
+cmake --build build-tests --target regression_unit_tests
+ctest --test-dir build-tests --output-on-failure -R 'regression.unit.Hardware'
+```
 
 ## Troubleshooting
 

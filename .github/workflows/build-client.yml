@@ -70,12 +70,19 @@ jobs:
           bash tests/test_macos_pkg.sh
           bash tests/test_macos_bundle_plan.sh
           bash tests/test_macos_select_signing_identities.sh
+          bash tests/test_macos_gmp_build.sh
+
+      # The one gate for the release GMP steps below: the macOS arm64 runner's
+      # optimized build, chosen by OS and architecture rather than runner name.
+      - name: Select release GMP build (macOS arm64)
+        if: runner.os == 'macOS' && runner.arch == 'ARM64' && matrix.config == 'optimized=1'
+        run: echo "RELEASE_GMP=1" >> "$GITHUB_ENV"
 
       # macOS bundles are not signed with a Developer ID and are not notarized.
-      # No Apple certificate is imported here and no Apple secret is read, so the
-      # packaging step cannot fail on missing credentials. The staged binaries are
-      # still re-signed ad-hoc inside scripts/package-macos-bundle.sh, which arm64
-      # requires after install_name_tool rewrites the Mach-O files.
+      # No Apple certificate is imported and no Apple secret is read, so macOS
+      # packaging cannot fail on missing credentials. The staged binaries are
+      # still re-signed ad-hoc inside scripts/package-macos-bundle.sh, which
+      # arm64 requires after install_name_tool rewrites the Mach-O files.
       - name: Install macOS deps (build + runtime)
         if: startsWith(matrix.os, 'macos')
         run: |
@@ -85,6 +92,15 @@ jobs:
           brew ls --versions gmp >/dev/null 2>&1 || brew install gmp
           brew ls --versions boost >/dev/null 2>&1 || brew install boost
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix gmp)/lib:${DYLD_FALLBACK_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+
+      # The arm64 release bundle ships GMP built from source with
+      # HGCD2_DIV2_METHOD=1 instead of the Homebrew bottle; see the script.
+      # Homebrew GMP stays installed for the other macOS jobs and for CMake.
+      - name: Build release GMP (macOS arm64)
+        if: env.RELEASE_GMP == '1'
+        run: |
+          scripts/build-macos-gmp.sh "$RUNNER_TEMP/chikvdf-gmp"
+          echo "GMP_PREFIX=$RUNNER_TEMP/chikvdf-gmp" >> "$GITHUB_ENV"
 
       # Runtime workaround for TSAN-instrumented binaries on Ubuntu runners.
       # Apply before build because make TSAN=1 runs ./compile_asm during build.
@@ -133,9 +149,9 @@ jobs:
           ./scripts/get-libft4222.sh install
           cd src
           if [ -n "$RELEASE_TAG" ]; then
-            make ${{ matrix.config }} CHIKVDF_VERSION="$RELEASE_TAG" CPPFLAGS="-I${BOOST_INCLUDE} ${CPPFLAGS:-}" -f Makefile.vdf-client vdf_client vdf_bench 1weso_test 2weso_test prover_test hw_proof_wait_test emu_hw_test hw_test emu_hw_vdf_client hw_vdf_client
+            make ${{ matrix.config }} CHIKVDF_VERSION="$RELEASE_TAG" GMP_PREFIX="${GMP_PREFIX:-}" CPPFLAGS="-I${BOOST_INCLUDE} ${CPPFLAGS:-}" -f Makefile.vdf-client vdf_client vdf_bench 1weso_test 2weso_test prover_test hw_proof_wait_test emu_hw_test hw_test emu_hw_vdf_client hw_vdf_client
           else
-            make ${{ matrix.config }} CPPFLAGS="-I${BOOST_INCLUDE} ${CPPFLAGS:-}" -f Makefile.vdf-client vdf_client vdf_bench 1weso_test 2weso_test prover_test hw_proof_wait_test emu_hw_test hw_test emu_hw_vdf_client hw_vdf_client
+            make ${{ matrix.config }} GMP_PREFIX="${GMP_PREFIX:-}" CPPFLAGS="-I${BOOST_INCLUDE} ${CPPFLAGS:-}" -f Makefile.vdf-client vdf_client vdf_bench 1weso_test 2weso_test prover_test hw_proof_wait_test emu_hw_test hw_test emu_hw_vdf_client hw_vdf_client
           fi
 
       - name: Cache Boost on Windows
@@ -395,7 +411,7 @@ jobs:
       - name: Package macOS bundle and installer
         if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1'
         env:
-          MACOS_ARCH: ${{ matrix.os == 'macos-15' && 'arm64' || 'intel' }}
+          MACOS_ARCH: ${{ runner.arch == 'ARM64' && 'arm64' || 'intel' }}
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || format('0.0.1-{0}', github.run_id) }}
           IS_RELEASE: ${{ inputs.is_final }}
         run: scripts/package-macos-bundle.sh
@@ -414,11 +430,25 @@ jobs:
             scripts/verify-macos-bundle.sh "$zip"
           done
 
+      - name: Verify macOS arm64 zip ships the release GMP
+        if: env.RELEASE_GMP == '1'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(dist/macos/*.zip)
+          if [ "${#zips[@]}" -eq 0 ]; then
+            echo "No macOS zip produced to verify" >&2
+            exit 1
+          fi
+          for zip in "${zips[@]}"; do
+            scripts/check-macos-gmp-build.sh "$zip"
+          done
+
       - name: Upload macOS bundle artifact
         if: startsWith(matrix.os, 'macos') && matrix.config == 'optimized=1'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.os == 'macos-15' && 'macos-arm64-bundle' || 'macos-intel-bundle' }}
+          name: ${{ runner.arch == 'ARM64' && 'macos-arm64-bundle' || 'macos-intel-bundle' }}
           path: |
             dist/macos/*.zip
             dist/macos/*.pkg
@@ -461,7 +491,8 @@ jobs:
             src/hw/libft4222/*.dylib
 
       # package-windows downloads this into the workspace root and expects the
-      # build/, src/hw/libft4222/, and mpir_gc_x64/ paths to be preserved.
+      # build/, src/hw/libft4222/ (including the staged FTDI driver), and
+      # mpir_gc_x64/ paths to be preserved.
       - name: Upload binaries artifact (Windows)
         if: matrix.os == 'windows-latest' && matrix.config == 'optimized=1'
         uses: actions/upload-artifact@v7
@@ -479,6 +510,7 @@ jobs:
             build/hw_vdf_client.exe
             src/hw/libft4222/*.dll
             src/hw/libft4222/*.lib
+            src/hw/libft4222/driver/**
             mpir_gc_x64/*.dll
 
       - name: Assemble Ubuntu .deb (same runner as build)
@@ -512,12 +544,14 @@ jobs:
           name: installer-${{ matrix.os }}
           path: dist/*.deb
 
-  # Windows bundles are assembled and packaged here, after the matrix has
+  # Windows bundles and installers are assembled here, after the matrix has
   # produced the raw binaries. This job is deliberately unsigned: no signing
-  # environment, no OIDC token, no signing credentials, so it also runs for
-  # pull requests. REQUIRE_SIGNATURES below disables only the Authenticode
-  # assertions; Package still enforces the DLL import closure and launches
-  # every shipped exe from a clean directory.
+  # environment, no OIDC token, no signing credentials, so it runs for pull
+  # requests too. Inno Setup omits SignTool/SignedUninstaller because no
+  # /DMySignTool is passed, and the installer ships unsigned.
+  # REQUIRE_SIGNATURES='false' disables only the Authenticode assertions;
+  # Package still enforces the DLL import closure and launches every shipped
+  # exe from a clean directory.
   package-windows:
     name: Package Windows bundle
     needs: [build]
@@ -528,6 +562,8 @@ jobs:
       contents: read
     env:
       INSTALLER_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || format('0.0.1-{0}', github.run_id) }}
+      IS_RELEASE: ${{ inputs.is_final }}
+      REQUIRE_SIGNATURES: 'false'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -549,7 +585,13 @@ jobs:
             'build/emu_hw_vdf_client.exe',
             'build/hw_vdf_client.exe',
             'mpir_gc_x64/mpir.dll',
-            'src/hw/libft4222'
+            'src/hw/libft4222',
+            'src/hw/libft4222/driver/ftdibus.inf',
+            'src/hw/libft4222/driver/ftdibus.cat',
+            'src/hw/libft4222/driver/ftdiport.inf',
+            'src/hw/libft4222/driver/ftdiport.cat',
+            'src/hw/libft4222/driver/amd64/ftdibus.sys',
+            'src/hw/libft4222/driver/amd64/ftd2xx64.dll'
           )
           foreach ($path in $required) {
             if (-not (Test-Path -LiteralPath $path)) {
@@ -566,15 +608,32 @@ jobs:
         shell: pwsh
         run: ./scripts/package-windows-bundle.ps1 -Action Assemble
 
+      - name: Test installer version parser
+        shell: pwsh
+        run: ./tests/test_windows_installer_version.ps1
+
+      - name: Install Inno Setup
+        uses: ./.github/actions/install-inno-setup
+
       - name: Package and verify Windows zip bundle
         shell: pwsh
-        env:
-          IS_RELEASE: ${{ inputs.is_final }}
-          # This bundle is not Authenticode-signed. Package still enforces the
-          # DLL import closure and launches every shipped exe from a clean
-          # directory; only the signature assertions are switched off here.
-          REQUIRE_SIGNATURES: 'false'
         run: ./scripts/package-windows-bundle.ps1 -Action Package
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: ./scripts/package-windows-bundle.ps1 -Action BuildInstaller
+
+      - name: Finalize Windows installer
+        shell: pwsh
+        run: ./scripts/package-windows-bundle.ps1 -Action FinalizeInstaller
+
+      - name: Verify Windows installer
+        shell: pwsh
+        run: ./scripts/package-windows-bundle.ps1 -Action VerifyInstaller
+
+      - name: Smoke-test Windows installer
+        shell: pwsh
+        run: ./scripts/package-windows-bundle.ps1 -Action TestInstaller
 
       - name: Upload Windows bundle artifact
         uses: actions/upload-artifact@v7
@@ -583,4 +642,5 @@ jobs:
           if-no-files-found: error
           path: |
             dist/windows/*.zip
+            dist/windows/*setup.exe
             dist/windows/*.sha256
