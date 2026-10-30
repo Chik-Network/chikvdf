@@ -609,10 +609,35 @@ assert_no_glue_wiring() {
   fi
 }
 
+# A ctest case whose executable the workflow never builds fails on exactly one
+# platform: Windows runs ctest against the full build tree (BUILD_HW_TOOLS=ON),
+# while the Ubuntu regression step reconfigure with BUILD_HW_TOOLS=OFF and never
+# registers the HW tests. That asymmetry is how a missing build target ships
+# green on three OSes and red on Windows.
+# shellcheck disable=SC2016
+assert_ci_build_targets() {
+  local client="${root}/.github/workflows/build-client.yml"
+  local cmake="${root}/src/CMakeLists.txt"
+  local win_build target
+
+  win_build=$(grep -F 'cmake --build build --target' "$client" | head -1)
+  if [ -z "$win_build" ]; then
+    fail "Windows job does not build with cmake --build build --target"
+  fi
+  for target in $(grep -oE 'add_test\(NAME regression\.[A-Za-z0-9_.]+ COMMAND [A-Za-z0-9_]+' "$cmake" |
+    awk '{print $NF}'); do
+    case " $win_build " in
+      *" $target "*) ;;
+      *) fail "CMake registers a regression test for ${target}, but the Windows job never builds it" ;;
+    esac
+  done
+}
+
 assert_publish_dependencies
 assert_windows_packaging_wiring
 assert_macos_packaging_wiring
 assert_no_glue_wiring
+assert_ci_build_targets
 
 rm -rf "$assets" "$gh_bin"
 rm -f "$calls" "$output"
