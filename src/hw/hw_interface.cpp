@@ -1,4 +1,5 @@
 #include "hw_interface.hpp"
+#include "hw_initialization.hpp"
 #include "chik_driver.hpp"
 #include "hw_util.hpp"
 #include "pll_freqs.hpp"
@@ -13,7 +14,7 @@
 #define REG_BYTES 4
 #define CHIK_VDF_JOB_SIZE (CHIK_VDF_CMD_START_REG_OFFSET - \
         CHIK_VDF_CMD_JOB_ID_REG_OFFSET + REG_BYTES)
-#define CHIK_VDF_JOB_CSR_MULT 0x10000
+constexpr uint32_t CHIK_VDF_JOB_CSR_MULT = HW_VDF_ENGINE_STRIDE;
 #define CHIK_VDF_JOB_ID_OFFSET 0x1000
 #define CHIK_VDF_JOB_STATUS_OFFSET 0x2000
 
@@ -53,40 +54,51 @@ void prepare_job(ChikDriver *drv, uint64_t n_iters, uint8_t *buf, mpz_t d, mpz_t
     mpz_clear(L);
 }
 
-ChikDriver *init_hw(double freq, double set_brd_voltage, uint32_t device_loc)
+namespace {
+struct InitialOperatingPointHardware {
+    ChikDriver *driver;
+    bool engine_control(unsigned engine, uint32_t value) {
+        return driver->RegWrite(CHIK_VDF_CONTROL_REG_OFFSET + CHIK_VDF_JOB_CSR_MULT * engine, value) == 0;
+    }
+    bool engine_control_read(unsigned engine, uint32_t &value) {
+        return driver->RegRead(CHIK_VDF_CONTROL_REG_OFFSET + CHIK_VDF_JOB_CSR_MULT * engine, value) == 0;
+    }
+    bool reset() { return driver->Reset(10000) == 0; }
+    bool frequency(double value) {
+        LOG_INFO("Setting frequency to %f MHz", value);
+        if (!driver->SetPLLFrequency(value, 0)) return false;
+        LOG_INFO("Frequency is %f MHz", driver->GetPLLFrequency());
+        return true;
+    }
+    bool voltage(double value) {
+        LOG_INFO("Board voltage is %1.3f V", driver->GetBoardVoltage());
+        LOG_INFO("Setting voltage to %1.3f V", value);
+        if (driver->SetBoardVoltage(value)) return false;
+        LOG_INFO("Board voltage is now %1.3f V", driver->GetBoardVoltage());
+        return true;
+    }
+};
+} // namespace
+
+ChikDriver *init_hw(double freq, double set_brd_voltage, uint32_t device_loc,
+                    const char *expected_serial)
 {
     bool set_status;
-    double freq_read, brd_voltage, brd_current, brd_power;
+    double brd_current, brd_power;
+    InitialOperatingPointHardware hardware;
     double external_alarm_temp = 100.0, engine_alarm_temp = 100.0;
 
     ChikDriver* drv = new ChikDriver();
-    if (drv->ftdi.Open(device_loc)) {
+    if (drv->ftdi.Open(device_loc, expected_serial)) {
         LOG_ERROR("Failed to open device");
         goto fail;
     }
 
-    LOG_INFO("Setting frequency to %f MHz", freq);
-    set_status = drv->SetPLLFrequency(freq, 0);
-    if (set_status == false) {
-        LOG_ERROR("Aborting since freq not set");
+    hardware.driver = drv;
+    if (!hw_initialization::operating_point(hardware, freq, set_brd_voltage)) {
+        LOG_ERROR("Aborting initial operating point: quiescence, reset, PLL or voltage failed");
         goto fail;
     }
-
-    // Check frequency
-    freq_read = drv->GetPLLFrequency();
-    LOG_INFO("Frequency is %f MHz", freq_read);
-
-    brd_voltage = drv->GetBoardVoltage();
-    LOG_INFO("Board voltage is %1.3f V", brd_voltage);
-
-    LOG_INFO("Setting voltage to %1.3f V", set_brd_voltage);
-    if (drv->SetBoardVoltage(set_brd_voltage) != 0) {
-        LOG_ERROR("Aborting since set voltage failed");
-        goto fail;
-    }
-
-    brd_voltage = drv->GetBoardVoltage();
-    LOG_INFO("Board voltage is now %1.3f V", brd_voltage);
 
     brd_current = drv->GetBoardCurrent();
     LOG_INFO("Board current is %2.3f A", brd_current);

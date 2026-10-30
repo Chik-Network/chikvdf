@@ -71,8 +71,8 @@ Add the Chik apt repository and install `chikvdf`:
 ```bash
 sudo apt-get update
 sudo apt-get install ca-certificates curl gnupg
-curl -sL https://repo.chik.net/FD39E6D3.pubkey.asc | sudo gpg --dearmor -o /usr/share/keyrings/chik.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/chik.gpg] https://repo.chik.net/chikvdf/debian/ stable main" | sudo tee /etc/apt/sources.list.d/chikvdf.list
+curl -sL https://repo.chiknetwork.com/FD39E6D3.pubkey.asc | sudo gpg --dearmor -o /usr/share/keyrings/chik.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/chik.gpg] https://repo.chiknetwork.com/chikvdf/debian/ stable main" | sudo tee /etc/apt/sources.list.d/chikvdf.list
 sudo apt-get update
 sudo apt-get install chikvdf
 ```

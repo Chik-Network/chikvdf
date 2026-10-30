@@ -6,6 +6,8 @@
 #include "timelord_live_control.hpp"
 
 #define N_HW_VDFS 3
+constexpr uint32_t HW_VDF_ENGINE_STRIDE = 0x10000;
+constexpr uint8_t HW_VDF_ALL_ENGINES = (1U << N_HW_VDFS) - 1;
 #define HW_VDF_STATUS_SIZE 0xb4
 #define HW_VDF_BURST_START 0x300014
 #define HW_VDF_TEMP_FLAG (1 << 3)
@@ -22,7 +24,9 @@ extern int chik_vdf_is_emu;
 
 class ChikDriver;
 // device_loc is the FTDI location printed by --list; zero selects the first board.
-ChikDriver *init_hw(double freq, double brd_voltage, uint32_t device_loc = 0);
+// expected_serial optionally confirms SPI/GPIO identities before hardware writes.
+ChikDriver *init_hw(double freq, double brd_voltage, uint32_t device_loc = 0,
+                    const char *expected_serial = nullptr);
 void stop_hw(ChikDriver *drv);
 
 struct vdf_state;
