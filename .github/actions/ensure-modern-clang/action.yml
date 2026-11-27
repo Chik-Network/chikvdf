@@ -1,0 +1,94 @@
+name: Ensure a modern LLVM (Windows)
+description: >
+  windows-latest now ships Visual Studio 18 (2026) with MSVC 14.52, whose STL
+  headers refuse any Clang older than 22 with "error STL1000". The image's
+  standalone LLVM can be older than that, which breaks both clang-cl compiling
+  against the MSVC STL and bindgen parsing it through libclang. Select the newest
+  available LLVM, install a current one when none is new enough, then export PATH
+  for clang-cl and LIBCLANG_PATH for bindgen.
+inputs:
+  minimum-major:
+    description: Minimum acceptable Clang major version.
+    required: false
+    default: "22"
+outputs:
+  llvm-bin:
+    description: Directory that was prepended to PATH.
+    value: ${{ steps.select.outputs.llvm-bin }}
+  clang-major:
+    description: Major version of the selected Clang.
+    value: ${{ steps.select.outputs.clang-major }}
+runs:
+  using: composite
+  steps:
+    - id: select
+      shell: pwsh
+      env:
+        MIN_MAJOR: ${{ inputs.minimum-major }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $min = [int]$env:MIN_MAJOR
+        $candidates = @(
+          'C:\Program Files\LLVM\bin',
+          'C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\Llvm\x64\bin',
+          'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Tools\Llvm\x64\bin'
+        )
+
+        function Get-ClangMajor([string]$dir) {
+          foreach ($name in @('clang-cl.exe', 'clang.exe')) {
+            $exe = Join-Path $dir $name
+            if (Test-Path -LiteralPath $exe) {
+              $text = (& $exe --version 2>&1 | Select-Object -First 1)
+              Write-Host ("  {0} -> {1}" -f $dir, $text)
+              if ($text -match 'clang version (\d+)\.') { return [int]$Matches[1] }
+              return -1
+            }
+          }
+          Write-Host "  $dir -> not present"
+          return -1
+        }
+
+        function Select-Best {
+          $bestDir = $null
+          $bestMajor = -1
+          foreach ($dir in $candidates) {
+            $major = Get-ClangMajor $dir
+            if ($major -gt $bestMajor) {
+              $bestMajor = $major
+              $bestDir = $dir
+            }
+          }
+          return @($bestDir, $bestMajor)
+        }
+
+        Write-Host 'available LLVM candidates:'
+        $sel = Select-Best
+        $bestDir = $sel[0]
+        $bestMajor = $sel[1]
+
+        if ($bestMajor -lt $min) {
+          Write-Host "newest LLVM on this image is $bestMajor (< $min); installing a current LLVM"
+          choco install llvm -y --force --no-progress
+          if ($LASTEXITCODE -ne 0) {
+            throw "choco install llvm failed with exit code $LASTEXITCODE"
+          }
+          Write-Host 'available LLVM candidates after install:'
+          $sel = Select-Best
+          $bestDir = $sel[0]
+          $bestMajor = $sel[1]
+        }
+
+        if (-not $bestDir -or $bestMajor -lt $min) {
+          throw "No LLVM >= $min is available (best: $bestMajor at $bestDir). MSVC 14.52 refuses any older Clang (error STL1000)."
+        }
+
+        $libclang = Join-Path $bestDir 'libclang.dll'
+        if (-not (Test-Path -LiteralPath $libclang)) {
+          throw "libclang.dll is missing in $bestDir; bindgen cannot run without it."
+        }
+
+        $bestDir | Out-File -Append -FilePath $env:GITHUB_PATH
+        "LIBCLANG_PATH=$bestDir" | Out-File -Append -FilePath $env:GITHUB_ENV
+        "llvm-bin=$bestDir" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+        "clang-major=$bestMajor" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+        Write-Host "selected clang $bestMajor from $bestDir"

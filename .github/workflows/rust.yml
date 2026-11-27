@@ -150,6 +150,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "get-mpir-gc-x64.sh failed with exit code $LASTEXITCODE" }
           "$(Get-Location)/mpir_gc_x64" | Out-File -Append -FilePath $env:GITHUB_PATH
 
+      # bindgen parses the MSVC STL through libclang, and MSVC 14.52 (Visual
+      # Studio 18, now the default on windows-latest) refuses any Clang older
+      # than 22 with "error STL1000". The shared action selects or installs a
+      # matching LLVM and exports LIBCLANG_PATH for bindgen.
+      - name: Ensure a modern LLVM toolchain (Windows)
+        if: matrix.os.name == 'Windows'
+        uses: ./.github/actions/ensure-modern-clang
+
       - name: Install libclang-dev on Linux
         if: matrix.os.name == 'Ubuntu'
         run: |
